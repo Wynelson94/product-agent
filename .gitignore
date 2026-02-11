@@ -1,0 +1,30 @@
+# Stress test outputs (regenerable, 4.9GB)
+projects/
+
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+
+# macOS
+.DS_Store
+
+# Build artifacts
+.build/
+.pytest_cache/
+
+# Claude Code local state
+.claude/
+.claude-v1/
+
+# MCP config (contains local paths)
+.mcp.json

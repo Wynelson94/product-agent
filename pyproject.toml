@@ -1,0 +1,46 @@
+[project]
+name = "product-agent"
+version = "7.0.0"
+description = "Autonomous AI agent that builds, tests, and deploys web and native iOS applications from ideas"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Product Agent" }
+]
+keywords = ["ai", "agent", "claude", "nextjs", "supabase", "swift", "swiftui", "ios", "automation"]
+
+dependencies = [
+    "claude-code-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+product-agent = "agent.main:main"
+build-product = "agent.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,337 @@
+# Plugin Module Domain Patterns
+
+Patterns for building individual Swift Package plugins that integrate with the
+NoCloud BS host app via the NCBSPlugin protocol.
+
+## Plugin Anatomy
+
+Every plugin is a self-contained Swift Package with:
+
+```
+NCBSMyPlugin/
+├── Package.swift           # SPM manifest
+├── Sources/NCBSMyPlugin/
+│   ├── MyPlugin.swift          # NCBSPlugin conformance (entry point)
+│   ├── PluginManifest.swift    # Host discovery hook
+│   ├── Views/                  # SwiftUI views
+│   ├── Models/                 # Data models (Codable structs)
+│   ├── ViewModels/             # @Observable view models
+│   └── Services/               # Plugin-specific logic
+└── Tests/NCBSMyPluginTests/
+    ├── MyPluginTests.swift     # Lifecycle tests
+    ├── ViewModelTests.swift    # ViewModel unit tests
+    └── Mocks/
+        └── MockPluginContext.swift
+```
+
+## Common Plugin Types
+
+### File Manager Plugin
+- Browse compressed local files
+- Upload/import from Photos or Files app
+- Folder organization
+- File preview with decompression
+- Share sheet integration
+- **Key services**: storageService, compressionService
+- **Permissions**: fileAccess, photoLibrary
+- **Icon**: "folder.fill"
+
+### Photo Gallery Plugin
+- Albums with compressed photo storage
+- Grid/list view of photos
+- Full-screen viewer with zoom
+- Import from camera or photo library
+- Compression stats per album
+- **Key services**: storageService, compressionService
+- **Permissions**: camera, photoLibrary
+- **Icon**: "photo.on.rectangle"
+
+### Document Scanner Plugin
+- Camera-based document scanning
+- OCR text extraction (Vision framework)
+- PDF generation from scans
+- Compressed document storage
+- Full-text search across scans
+- **Key services**: storageService, compressionService
+- **Permissions**: camera
+- **Icon**: "doc.text.viewfinder"
+
+### Notes Plugin
+- Rich text notes with markdown
+- Note organization (folders, tags)
+- Compressed note storage
+- Search across all notes
+- **Key services**: storageService
+- **Permissions**: none
+- **Icon**: "note.text"
+
+### Backup Manager Plugin
+- Select data to back up
+- Compressed local backups with timestamps
+- Restore from backup
+- Backup scheduling
+- Storage usage per backup
+- **Key services**: storageService, compressionService
+- **Permissions**: fileAccess
+- **Icon**: "arrow.clockwise.circle"
+
+### Analytics Dashboard Plugin
+- Compression statistics over time
+- Storage usage trends
+- Per-file compression ratios
+- Charts and visualizations
+- **Key services**: storageService
+- **Permissions**: none
+- **Icon**: "chart.bar.fill"
+
+## Data Model Patterns
+
+### Always Use Codable Structs
+
+```swift
+struct Photo: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var albumId: UUID
+    var createdAt: Date
+    var sizeOriginal: Int64
+    var sizeCompressed: Int64
+    var metadata: PhotoMetadata?
+
+    var compressionRatio: Double {
+        guard sizeCompressed > 0 else { return 0 }
+        return Double(sizeOriginal) / Double(sizeCompressed)
+    }
+}
+
+struct PhotoMetadata: Codable, Hashable {
+    var width: Int
+    var height: Int
+    var format: String
+    var location: String?
+}
+```
+
+### Storage Key Convention
+
+Plugins should namespace their storage keys:
+
+```swift
+// Good: namespaced keys
+"albums"                     // list of albums
+"albums/\(albumId)/photos"   // photos in an album
+"photos/\(photoId)/data"     // photo binary data
+"settings"                   // plugin settings
+
+// The StorageService automatically scopes to the plugin's directory
+```
+
+## ViewModel Patterns
+
+### Standard Load/Save Cycle
+
+```swift
+@Observable
+final class AlbumListViewModel {
+    var albums: [Album] = []
+    var isLoading = false
+    var error: String?
+    var selectedAlbum: Album?
+
+    private let context: PluginContext
+    private let storageKey = "albums"
+
+    init(context: PluginContext) {
+        self.context = context
+    }
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            if let data = try await context.storageService.load(key: storageKey) {
+                albums = try JSONDecoder().decode([Album].self, from: data)
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func save() async {
+        do {
+            let data = try JSONEncoder().encode(albums)
+            try await context.storageService.save(data, key: storageKey)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func createAlbum(name: String) async {
+        let album = Album(name: name)
+        albums.append(album)
+        await save()
+    }
+
+    func deleteAlbum(_ album: Album) async {
+        albums.removeAll { $0.id == album.id }
+        // Also delete album contents
+        let photoKeys = await context.storageService.listKeys(prefix: "albums/\(album.id)/")
+        for key in photoKeys {
+            try? await context.storageService.delete(key: key)
+        }
+        await save()
+    }
+}
+```
+
+### Handling Permissions
+
+```swift
+func importFromPhotos() async {
+    guard await context.requestPermission(.photoLibrary) else {
+        error = "Photo library access is required to import photos"
+        return
+    }
+    // Proceed with PHPicker
+}
+```
+
+### Compression Workflow
+
+```swift
+func savePhoto(imageData: Data, name: String, album: Album) async throws {
+    let sizeOriginal = Int64(imageData.count)
+
+    // Compress using the host's engine
+    let compressed = try await context.compressionService.compress(data: imageData)
+    let sizeCompressed = Int64(compressed.count)
+
+    // Store compressed data
+    let photoId = UUID()
+    try await context.storageService.save(compressed, key: "albums/\(album.id)/photos/\(photoId)/data")
+
+    // Update metadata
+    let photo = Photo(
+        id: photoId,
+        name: name,
+        albumId: album.id,
+        createdAt: Date(),
+        sizeOriginal: sizeOriginal,
+        sizeCompressed: sizeCompressed
+    )
+    // ... save photo metadata to album's photo list
+}
+```
+
+## View Patterns
+
+### List with Empty State
+
+```swift
+struct AlbumListView: View {
+    @State private var viewModel: AlbumListViewModel
+
+    var body: some View {
+        Group {
+            if viewModel.isLoading {
+                ProgressView()
+            } else if viewModel.albums.isEmpty {
+                ContentUnavailableView(
+                    "No Albums",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Create your first album to start organizing photos")
+                )
+            } else {
+                List(viewModel.albums) { album in
+                    NavigationLink(value: album) {
+                        AlbumRow(album: album)
+                    }
+                }
+            }
+        }
+        .task { await viewModel.load() }
+    }
+}
+```
+
+### Compression Stats Badge
+
+Show compression stats wherever file sizes are displayed:
+
+```swift
+struct FileSizeView: View {
+    let original: Int64
+    let compressed: Int64
+
+    var ratio: Double {
+        guard compressed > 0 else { return 0 }
+        return Double(original) / Double(compressed)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(ByteCountFormatter.string(fromByteCount: compressed, countStyle: .file))
+                .foregroundStyle(.secondary)
+            if ratio > 1 {
+                Text("\(ratio, specifier: "%.1f")x")
+                    .font(.caption2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(.green.opacity(0.15))
+                    .foregroundStyle(.green)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+}
+```
+
+## Testing Patterns
+
+### Mock PluginContext
+
+Always provide a mock context that the tests can inspect.
+Use dependency injection so tests can substitute custom mock services:
+
+```swift
+final class MockPluginContext: PluginContext, @unchecked Sendable {
+    let compressionService: CompressionServiceProtocol
+    let storageService: StorageServiceProtocol
+    let networkService: NetworkServiceProtocol
+    let userDefaults: UserDefaults
+    var permissionRequests: [PluginPermission] = []
+
+    init(
+        compression: CompressionServiceProtocol = MockCompressionService(),
+        storage: StorageServiceProtocol = MockStorageService(),
+        network: NetworkServiceProtocol = MockNetworkService(),
+        defaults: UserDefaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
+    ) {
+        self.compressionService = compression
+        self.storageService = storage
+        self.networkService = network
+        self.userDefaults = defaults
+    }
+
+    func requestPermission(_ permission: PluginPermission) async -> Bool {
+        permissionRequests.append(permission)
+        return true
+    }
+}
+```
+
+### Test the Full Round-Trip
+
+```swift
+func testSaveAndLoadAlbum() async throws {
+    let vm = AlbumListViewModel(context: MockPluginContext())
+    await vm.createAlbum(name: "Vacation")
+    XCTAssertEqual(vm.albums.count, 1)
+
+    // Simulate relaunch
+    let vm2 = AlbumListViewModel(context: vm.context)
+    await vm2.load()
+    XCTAssertEqual(vm2.albums.count, 1)
+    XCTAssertEqual(vm2.albums.first?.name, "Vacation")
+}
+```
