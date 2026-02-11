@@ -5,8 +5,18 @@ NoCloud BS host app via the NCBSPlugin protocol.
 
 ## Host App Context — NoCloud BS
 
-Plugins snap into the NoCloud BS app, a dual-platform (macOS + iOS) file manager
-with lossless compression. Key requirements for all plugins:
+Plugins snap into **NoCloud BS**, a dual-platform (macOS + iOS) app built around a
+**patented lossless compression engine**. The app is NOT a simple file manager — it
+reads the user's entire environment, compresses everything losslessly (bit-for-bit
+identical roundtrip), and keeps data fully usable while compressed. It also includes
+a comprehensive file viewer engine for all file types (images, PDFs, video, audio,
+documents, spreadsheets, code, archives, 3D models) that works seamlessly on
+compressed data. Files shared via iMessage/AirDrop/email arrive still compressed AND
+usable by recipients without the app installed.
+
+**The compression engine is the HEART of the app. Plugins extend it — they never replace it.**
+
+Key requirements for all plugins:
 
 ### Color System
 Plugins MUST use the host's color palette, not custom colors:
@@ -363,3 +373,55 @@ func testSaveAndLoadAlbum() async throws {
     XCTAssertEqual(vm2.albums.first?.name, "Vacation")
 }
 ```
+
+---
+
+## Real App Context (from Taylor's Master Agent Prompt)
+
+### Golden Rules for Plugins
+
+These rules apply to all code in the NoCloud BS ecosystem — including plugins:
+
+1. **NEVER rename** anything from the host SDK (NCBSPlugin, PluginContext, service protocols)
+2. **NEVER delete** working code — enhance, optimize, extend only
+3. **All changes must be additive and backwards-compatible**
+4. **Follow existing code style** — match what's already in the plugin
+5. **The compression engine is the core** — plugins use it via PluginContext, never implement their own
+
+### Quality Bar
+
+Plugin code must match the host app's quality standards:
+
+| Metric | Target |
+|--------|--------|
+| Crash-free rate | ≥ 99.95% |
+| Force unwraps | Zero |
+| Force try | Zero |
+| Force cast | Zero |
+| SwiftLint warnings | Zero |
+| Test coverage | 90%+ line coverage |
+| Main Thread Checker | Zero violations |
+| Memory leaks | Zero |
+
+### Offline-First Enforcement
+
+This is the defining difference between NoCloud BS plugins and generic SwiftUI code:
+
+- **No feature may be gated behind network connectivity** — not even partially
+- **No spinners for "connecting"** — there is nothing to connect to
+- **No error states for "no connection"** — offline IS the normal state
+- **Cloud sync is additive only** — it enhances but is never required
+- **Every feature must work on airplane mode** — test this explicitly
+- Networking (if any) uses an offline queue: persisted to SQLite, processes on connectivity restoration, survives app termination
+
+### What the Host Already Provides
+
+Plugins should leverage the host app's capabilities rather than duplicating them:
+
+- **Compression**: Use `context.compressionService` — the host has LZ4/zstd/LZMA/LZFSE with adaptive selection
+- **File viewing**: The host has a comprehensive viewer for all file types — don't rebuild viewers
+- **File type detection**: The host uses UTType + C++ magic-byte detection (100+ types, 10K files/sec)
+- **Storage**: Use `context.storageService` — automatically scoped, compressed, managed
+- **Thumbnail pipeline**: The host generates thumbnails (background → disk cache → progressive loading)
+- **Transfer/sharing**: The host handles compressed file sharing via UIActivityItemProvider
+- **Design system**: The host provides DSColor, DSTypography, DSSpacing tokens — use them

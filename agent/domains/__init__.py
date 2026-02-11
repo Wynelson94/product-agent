@@ -1,10 +1,12 @@
-"""Domain-specific patterns for Product Agent v6.0.
+"""Domain-specific patterns for Product Agent v7.0.
 
 Provides specialized templates and patterns for different product types:
 - marketplace: Two-sided platforms, buyer/seller interactions
 - saas: Multi-tenant SaaS with organizations and subscriptions
 - internal_tool: Admin dashboards, back-office tools
 - content_site: Nonprofits, portfolios, marketing sites, blogs (v6.0)
+- plugin_host: NoCloud BS host app with plugin infrastructure (v7.0)
+- plugin_module: Swift Package plugins for NoCloud BS (v7.0)
 """
 
 from pathlib import Path
@@ -67,5 +69,18 @@ def get_domain_for_product_type(product_type: str) -> str | None:
         "blog": "content_site",
         "landing_page": "content_site",
         "event_site": "content_site",
+
+        # NoCloud BS / Plugin host domain (v7.0)
+        "nocloud": "plugin_host",
+        "nocloud_bs": "plugin_host",
+        "compression_app": "plugin_host",
+        "file_manager": "plugin_host",
+        "file_viewer": "plugin_host",
+
+        # Plugin module domain (v7.0)
+        "nocloud_plugin": "plugin_module",
+        "swift_plugin": "plugin_module",
+        "ios_plugin": "plugin_module",
+        "plugin_module": "plugin_module",
     }
     return mappings.get(product_type)

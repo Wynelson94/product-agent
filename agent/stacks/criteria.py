@@ -154,6 +154,13 @@ PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
     "ios_app": ["swift-swiftui"],
     "plugin_module": ["swift-swiftui"],
     "native_app": ["swift-swiftui"],
+
+    # NoCloud BS (v7.0)
+    "nocloud": ["swift-swiftui"],
+    "nocloud_bs": ["swift-swiftui"],
+    "compression_app": ["swift-swiftui"],
+    "file_manager": ["swift-swiftui"],
+    "file_viewer": ["swift-swiftui"],
 }
 
 

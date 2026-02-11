@@ -337,3 +337,108 @@ Each new plugin only requires:
 1. Adding the SPM dependency to `Package.swift`
 2. Adding `import NCBSPluginName`
 3. Adding `registry.register(PluginNamePlugin.self)`
+
+---
+
+## Real App Context (from Taylor's Master Agent Prompt)
+
+The following sections capture key details about the real NoCloud BS app that go beyond
+the basic plugin architecture. When building host features, the agent should be aware of
+the full scope of the product.
+
+### Compression Algorithm Strategy
+
+The compression engine uses adaptive algorithm selection based on file access frequency:
+
+| Algorithm | Speed | Ratio | When Used |
+|-----------|-------|-------|-----------|
+| LZ4 | Ultra-fast decompress | Lower | Hot/frequently-accessed files |
+| Apple LZFSE | Hardware-accelerated | Good | General use on Apple Silicon |
+| zstd | Balanced | Better | Warm files |
+| LZMA | Slower | Best | Cold storage, archival |
+
+Rules:
+- Already-compressed formats (JPEG, MP4, ZIP) → store as-is or minimal wrapping
+- Files <4KB → skip compression
+- Target: ≥500MB/s compress, ≥1GB/s decompress (Apple Silicon)
+- Target: ≥30% average size reduction
+- Target: 64MB memory ceiling
+- **100.000% lossless pass rate — zero exceptions**
+
+### File Viewer Engine
+
+The host app is NOT just a file manager — it includes a comprehensive viewer for ALL file types:
+- **Images**: JPEG/PNG/GIF/WebP/HEIC/TIFF/BMP/SVG/RAW/PSD — pinch-zoom, tile rendering >4096px, EXIF overlay
+- **PDF**: Multi-page with thumbnail sidebar, search, text selection
+- **Video**: Custom blackGold/gold controls, PiP, AirPlay, speed control
+- **Audio**: Waveform visualization (gold on black), playback controls, ID3 metadata
+- **Documents**: RTF, plain text, Markdown rendered, HTML sandboxed
+- **Spreadsheets**: CSV/TSV in scrollable grid with gold headers
+- **Code**: Syntax highlighting for 20+ languages with blackGold/gold theme
+- **Archives**: Browse without extracting, preview individual files inside
+- **3D**: USDZ via SceneKit/RealityKit
+
+All viewing works on compressed data seamlessly through the transparent access layer.
+Thumbnail pipeline: background generation → disk cache → progressive loading (icon → low-res → full-res).
+
+### Transfer Integrity
+
+Files shared via iMessage, AirDrop, or email arrive **STILL compressed AND immediately usable**
+by recipients **without the NoCloud BS app installed**. Uses UIActivityItemProvider/NSItemProvider
+with proper UTType registration.
+
+### C++/Swift Interop Layer
+
+Performance-critical modules are implemented in C++ with Swift 5.9+ interop:
+- Image processing pipeline
+- Magic-byte file type detection (100+ types, 10K files/sec)
+- Compression algorithms (LZ4, zstd, LZMA wrappers)
+- Audio DSP
+- Text indexing
+
+C++ modules use include/src/modulemap structure. Memory safety enforced via RAII wrappers,
+unique_ptr/shared_ptr, with documented ownership at every Swift/C++ boundary.
+
+### Golden Rules
+
+These rules apply to ALL code changes in the NoCloud BS codebase:
+
+1. **READ existing codebase FIRST** before making any changes
+2. **NEVER rename** existing variables, functions, classes, modules, or files
+3. **NEVER change** the app's existing vocabulary or terminology
+4. **NEVER delete** working code — enhance, optimize, extend only
+5. **Follow existing code style** — match what's already there
+6. **All changes must be additive and backwards-compatible**
+7. **The compression engine is the core** — never break it
+
+### Security Requirements
+
+- Keychain for all sensitive data (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+- Biometric auth via LAContext (Face ID / Touch ID)
+- Encrypted databases (SQLCipher or NSFileProtectionComplete)
+- ATS enforced, zero exceptions
+- Public key pinning for optional network calls
+- Input validation on all user input (path traversal, injection prevention)
+- Secure logging (%{private}@ for sensitive data, strip debug logs in Release)
+- Jailbreak detection with graceful degradation
+- macOS hardened runtime
+- Pin all dependency versions
+- Secure deletion: filesystem + caches + DB + search index
+
+### Extended Quality Targets
+
+In addition to the performance targets listed above:
+
+| Metric | Target |
+|--------|--------|
+| Crash-free rate | ≥ 99.95% |
+| SwiftLint warnings | Zero |
+| Force unwraps | Zero in entire codebase |
+| Force try | Zero in entire codebase |
+| Force cast | Zero in entire codebase |
+| Test coverage | 90%+ line coverage |
+| Memory leaks | Zero (Instruments verified) |
+| Data races | Zero (TSan verified) |
+| Binary size | < 50MB |
+| Energy impact | "Low" in Instruments |
+| App Store | First-submission approval target |
