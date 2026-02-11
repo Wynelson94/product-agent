@@ -244,6 +244,13 @@ Design the plugin module with:
 - **Storage Keys**: Namespaced key convention for plugin data
 - **Permissions**: Which PluginPermissions are needed
 
+### NoCloud BS Plugin Requirements
+- **Colors**: Use the host's color palette (black #000000, blackGold #1A1400, gold #CFB53B, teal #008080).
+  No custom color schemes — plugins must visually match the host app. Include `Color+NoCloudBS.swift`.
+- **Offline-First**: Every feature must work without internet. No network-dependent features, no loading spinners waiting on connectivity.
+- **Dual-Platform**: Design views that work on both iOS (NavigationStack) and macOS (NavigationSplitView).
+- **Accessibility**: Include VoiceOver labels for all interactive elements in the design. WCAG AAA contrast (7:1).
+
 ### Swift Data Model Format
 Use Swift structs instead of database tables:
 ```swift
@@ -472,11 +479,14 @@ DESIGN.md is authoritative for architecture and structure.
 5. Run `swift build` to verify dependency resolves
 6. Implement `[PluginName]Plugin.swift` conforming to `NCBSPlugin` protocol with `init(context: PluginContext)` (NOT `init()`)
 7. Implement `PluginManifest.swift` — see the "Plugin PluginManifest Pattern" section below
-8. Implement views, models, and view models per DESIGN.md
+8. Create `Sources/[PluginName]Plugin/Color+NoCloudBS.swift` with the host color constants:
+   black (#000000), blackGold (#1A1400), gold (#CFB53B), goldLight (#E8D48B),
+   teal (#008080), tealLight (#40E0D0). Use these in ALL views — no custom colors.
+9. Implement views, models, and view models per DESIGN.md
    **CRITICAL**: All ViewModels MUST use the `@Observable` macro, NOT `ObservableObject`/`@Published`.
    Views use `@State` for owned ViewModels and plain property references — no `@ObservedObject` or `@StateObject`.
-9. Create `MockPluginContext.swift` for tests (must conform to `PluginContext` protocol)
-10. Run `swift build` to verify final compilation
+10. Create `MockPluginContext.swift` for tests (must conform to `PluginContext` protocol)
+11. Run `swift build` to verify final compilation
 
 #### Host Mode (--mode host)
 1. **FIRST: Create NCBSPluginSDK as a local package** — this MUST exist before the host app can build

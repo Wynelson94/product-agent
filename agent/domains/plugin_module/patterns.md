@@ -3,6 +3,34 @@
 Patterns for building individual Swift Package plugins that integrate with the
 NoCloud BS host app via the NCBSPlugin protocol.
 
+## Host App Context — NoCloud BS
+
+Plugins snap into the NoCloud BS app, a dual-platform (macOS + iOS) file manager
+with lossless compression. Key requirements for all plugins:
+
+### Color System
+Plugins MUST use the host's color palette, not custom colors:
+| Token | Hex | Use |
+|-------|-----|-----|
+| black | #000000 | Primary background (OLED true black) |
+| blackGold | #1A1400 | Cards, sheets, modals, nav bars (warm black with gold undertone) |
+| gold | #CFB53B | Primary accent — buttons, selections, progress |
+| goldLight | #E8D48B | Gold text on dark backgrounds |
+| teal | #008080 | Secondary accent — links, toggles, secondary buttons |
+| tealLight | #40E0D0 | Teal text on dark backgrounds |
+| error | #FF453A | Destructive actions, validation errors |
+| success | #30D158 | Confirmations, positive states |
+| warning | #FFD60A | Caution states |
+
+Until plugins can import the host's DesignSystem package, define these as
+local Color extensions in the plugin (see `Color+NoCloudBS.swift`).
+
+### Hard Requirements
+- **100% Offline-First**: Every feature must work without internet. No spinners waiting on network, no error states for "no connection", no degraded experience offline.
+- **Dual-Platform**: Views must adapt to macOS (NavigationSplitView) and iOS (NavigationStack + TabBar).
+- **Accessibility**: VoiceOver labels on all interactive elements, Dynamic Type support, WCAG AAA contrast (7:1 ratio).
+- **Performance**: Never block the main thread. Async load/save. Smooth 120fps scroll.
+
 ## Plugin Anatomy
 
 Every plugin is a self-contained Swift Package with:

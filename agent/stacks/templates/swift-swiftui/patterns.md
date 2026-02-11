@@ -241,6 +241,99 @@ struct MyView: View {
 }
 ```
 
+## NoCloud BS Color System
+
+Plugins must use the host app's color palette. Until the DesignSystem Swift Package
+is available as a public dependency, define these as local Color extensions:
+
+```swift
+// Color+NoCloudBS.swift — Plugin color constants
+import SwiftUI
+
+extension Color {
+    static let ncbsBlack = Color(red: 0, green: 0, blue: 0)
+    static let ncbsBlackGold = Color(red: 0.102, green: 0.078, blue: 0)
+    static let ncbsGold = Color(red: 0.812, green: 0.710, blue: 0.231)
+    static let ncbsGoldLight = Color(red: 0.910, green: 0.831, blue: 0.545)
+    static let ncbsGoldDark = Color(red: 0.545, green: 0.478, blue: 0.169)
+    static let ncbsTeal = Color(red: 0, green: 0.502, blue: 0.502)
+    static let ncbsTealLight = Color(red: 0.251, green: 0.878, blue: 0.816)
+    static let ncbsTealDark = Color(red: 0, green: 0.373, blue: 0.373)
+    static let ncbsError = Color(red: 1, green: 0.271, blue: 0.227)
+    static let ncbsSuccess = Color(red: 0.188, green: 0.820, blue: 0.345)
+    static let ncbsWarning = Color(red: 1, green: 0.839, blue: 0.039)
+}
+```
+
+Use these in ALL views — no custom colors. Examples:
+```swift
+.background(Color.ncbsBlackGold)       // card backgrounds
+.foregroundStyle(Color.ncbsGold)        // primary accent text
+.tint(Color.ncbsTeal)                   // toggles, secondary buttons
+```
+
+## Accessibility Patterns
+
+Every interactive element must include VoiceOver support:
+
+```swift
+// Buttons and tappable elements
+Button(action: addItem) {
+    Image(systemName: "plus")
+}
+.accessibilityLabel("Add item")
+.accessibilityHint("Creates a new item")
+
+// Data displays
+Text(formattedAmount)
+    .accessibilityLabel("Budget remaining: \(formattedAmount)")
+
+// Toggle/switch
+Toggle("Dark Mode", isOn: $isDarkMode)
+    .accessibilityLabel("Dark mode")
+    .accessibilityValue(isDarkMode ? "On" : "Off")
+```
+
+Support Dynamic Type — never use fixed font sizes:
+```swift
+// CORRECT
+.font(.headline)
+.font(.body)
+
+// WRONG — does not scale with Dynamic Type
+// .font(.system(size: 16))
+```
+
+## Dual-Platform Patterns
+
+Views must adapt to both macOS and iOS:
+
+```swift
+// Navigation — use NavigationSplitView on macOS, NavigationStack on iOS
+#if os(macOS)
+NavigationSplitView {
+    SidebarView()
+} detail: {
+    DetailView()
+}
+#else
+NavigationStack {
+    ContentView()
+}
+#endif
+
+// Platform-specific modifiers
+.navigationBarTitleDisplayMode(.inline)  // iOS only
+#if os(macOS)
+.frame(minWidth: 600, minHeight: 400)
+#endif
+```
+
+Platform array in Package.swift:
+```swift
+platforms: [.iOS(.v17), .macOS(.v14)]
+```
+
 ## Naming Conventions
 
 - **Types**: PascalCase (`ItemListViewModel`, `StorageService`)

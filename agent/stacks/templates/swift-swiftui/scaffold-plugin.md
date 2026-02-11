@@ -9,6 +9,7 @@ NCBS[PluginName]/
 │   └── NCBS[PluginName]/
 │       ├── [PluginName]Plugin.swift        # NCBSPlugin conformance
 │       ├── PluginManifest.swift            # Host discovery entry point
+│       ├── Color+NoCloudBS.swift           # Host color palette constants
 │       ├── Views/
 │       │   ├── MainView.swift              # Plugin's primary view
 │       │   ├── SettingsView.swift          # Plugin settings (optional)

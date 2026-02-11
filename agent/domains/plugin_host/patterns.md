@@ -3,6 +3,38 @@
 Patterns for building the NoCloud BS host application — the shell that discovers,
 loads, and manages Swift Package plugins.
 
+## NoCloud BS Host App Context
+
+### Color System (DesignSystem Package)
+The host app uses a DesignSystem Swift Package with DSColor, DSTypography, and DSSpacing tokens.
+All UI must use these exact colors:
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| black | #000000 | Primary background (OLED true black) |
+| blackGold | #1A1400 | Cards, sheets, modals, nav bars (warm black with gold undertone) |
+| gold | #CFB53B | Primary accent — buttons, selections, progress indicators |
+| goldLight | #E8D48B | Gold text on dark backgrounds |
+| goldDark | #8B7A2B | Pressed/active states for gold elements |
+| teal | #008080 | Secondary accent — links, toggles, secondary buttons |
+| tealLight | #40E0D0 | Teal text on dark backgrounds |
+| tealDark | #005F5F | Pressed/active states for teal elements |
+| error | #FF453A | Destructive actions, validation errors |
+| success | #30D158 | Confirmations, positive states |
+| warning | #FFD60A | Caution states |
+
+### Performance Targets
+- **120fps scroll**: All lists and scroll views must maintain 120fps on ProMotion displays
+- **<400ms cold launch**: App must be interactive within 400ms of launch
+- **<16ms compression transparency**: Compression/decompression overhead must be invisible to the user
+- **Zero main-thread blocking**: All I/O is async. No synchronous file or storage access on main thread.
+
+### Hard Requirements
+- **100% Offline-First**: Every feature must work without internet. No feature is gated behind connectivity.
+- **Dual-Platform**: macOS uses NavigationSplitView; iOS uses NavigationStack + TabBar. All views must adapt.
+- **Accessibility**: WCAG AAA contrast (7:1), VoiceOver labels on all interactive elements, Dynamic Type, Reduce Motion support.
+- **Patented Compression**: SHA-256 verified lossless compression. The compression engine is integrated separately — stubs are used in generated code.
+
 ## Architecture
 
 The host app has three responsibilities:
