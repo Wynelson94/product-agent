@@ -41,6 +41,9 @@ def analyze_product_idea(idea: str) -> dict:
         "ios_app": ["swift", "swiftui", "ios", "iphone", "ipad", "xcode", "native ios"],
         "plugin_module": ["plugin", "plug-in", "feature module", "swift package", "module"],
         "native_app": ["native app", "apple", "app store", "testflight"],
+        "widget": ["widget", "widgetkit", "home screen widget"],
+        "app_clip": ["app clip", "appclip"],
+        "utility_app": ["utility", "tool app", "helper app"],
     }
 
     for product_type, keywords in type_keywords.items():
@@ -59,6 +62,7 @@ def analyze_product_idea(idea: str) -> dict:
         "local_storage": ["local storage", "on-device", "device storage", "compress"],
         "compression": ["compression", "compress", "lossless", "decompress"],
         "swift_packages": ["swift package", "spm", "package.swift"],
+        "swiftdata": ["swiftdata", "swift data", "persistent model"],
     }
 
     for feature, keywords in feature_keywords.items():

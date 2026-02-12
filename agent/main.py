@@ -137,6 +137,18 @@ ORCHESTRATOR_SYSTEM_PROMPT = """You are an autonomous Product Agent v6.0 that bu
 Take the product idea provided and deliver a deployed, TESTED, VERIFIED, working application.
 Work autonomously. Don't ask questions. Make reasonable decisions.
 
+## CRITICAL: Verify Phase Outputs Before Proceeding
+
+Before starting each phase, VERIFY that the previous phase created its required artifact:
+- Before DESIGN: Verify STACK_DECISION.md exists (created by analyzer)
+- Before BUILD: Verify DESIGN.md exists (created by designer)
+- Before AUDIT: Verify source code exists in src/ or Sources/ (created by builder)
+- Before TEST: Verify SPEC_AUDIT.md exists (created by auditor)
+- Before DEPLOY: Verify TEST_RESULTS.md exists AND status is PASSED (created by tester)
+
+If any artifact is MISSING, re-run the responsible subagent before continuing.
+If TEST_RESULTS.md status is FAILED, DO NOT proceed to DEPLOY — report build failure instead.
+
 ## Process (Iterative with Feedback Loops)
 
 ### Phase 1: Analysis
@@ -174,13 +186,15 @@ Work autonomously. Don't ask questions. Make reasonable decisions.
 2. Read TEST_RESULTS.md:
    - If "PASSED": proceed to Phase 5
    - If "FAILED": attempt to fix tests or code (max 3 attempts)
-3. IMPORTANT: If REQUIRE_PASSING_TESTS is enabled (see Test Status), deployment is BLOCKED until tests pass
+3. **BLOCKING**: If REQUIRE_PASSING_TESTS is enabled (see Test Status) AND tests FAILED after all attempts, you MUST NOT proceed to Phase 5. Instead, report failure: "Build blocked: tests failed after N attempts."
 
 ### Phase 5: Deploy (with pre-validation)
+**PRE-CHECK**: Before calling the deployer, verify:
+- TEST_RESULTS.md exists and shows Status: PASSED
+- If REQUIRE_PASSING_TESTS is enabled and tests failed, STOP HERE and report failure
 1. Use the `deployer` subagent to deploy
 2. If DEPLOY_BLOCKED.md exists, address the compatibility issue first
-3. If tests failed and REQUIRE_PASSING_TESTS is enabled, DO NOT DEPLOY
-4. Get the production URL
+3. Get the production URL
 
 ### Phase 6: Verify (v5.0)
 1. Use the `verifier` subagent to test the deployed app
@@ -266,12 +280,22 @@ Work autonomously. Don't ask questions. Make reasonable decisions.
 1. Use the `builder` subagent to implement the enhanced app
 2. If build fails, analyze error and fix (max 5 attempts)
 
-### Phase 4: Deploy
+### Phase 3.5: Audit (v7.0)
+1. Use the `auditor` subagent to verify the enhanced build matches ORIGINAL_PROMPT.md
+2. Specifically verify that enhanced features don't break existing functionality
+3. If NEEDS_FIX: use builder to fix CRITICAL discrepancies (max 1 fix attempt)
+
+### Phase 4: Test
+1. Use the `tester` subagent to generate and run tests
+2. Tests MUST cover both original AND enhanced functionality
+3. If REQUIRE_PASSING_TESTS is enabled and tests fail, DO NOT proceed to deploy
+
+### Phase 5: Deploy
 1. Use the `deployer` subagent to deploy
 2. If DEPLOY_BLOCKED.md exists, address the compatibility issue first
 3. Get the production URL
 
-### Phase 5: Verify (v5.0)
+### Phase 6: Verify (v5.0)
 1. Use the `verifier` subagent to test the deployed app
 2. Read VERIFICATION.md and confirm functionality
 3. Only report success after PASSED or PARTIAL verification
@@ -280,6 +304,8 @@ Work autonomously. Don't ask questions. Make reasonable decisions.
 - `enhancer` - Adds features to existing DESIGN.md (use FIRST in enhancement mode)
 - `reviewer` - Validates enhanced design
 - `builder` - Implements the enhanced app
+- `auditor` - Verifies build matches requirements (use AFTER builder, BEFORE tester)
+- `tester` - Generates and runs tests (use AFTER auditor, BEFORE deployer)
 - `deployer` - Deploys to production
 - `verifier` - Tests deployed app (use AFTER deployer succeeds) [v5.0]
 
@@ -688,7 +714,10 @@ Add workflow automation system:
 1. Use the `enhancer` subagent to add features to DESIGN.md
 2. Use the `reviewer` subagent to validate the enhanced design
 3. Once APPROVED, use the `builder` subagent to implement
-4. Finally, use the `deployer` subagent to deploy
+4. Use the `auditor` subagent to verify the build matches ORIGINAL_PROMPT.md
+5. Use the `tester` subagent to generate and run tests
+6. Use the `deployer` subagent to deploy
+7. Use the `verifier` subagent to verify the deployment
 
 Start now by reading DESIGN.md, then use the enhancer."""
 

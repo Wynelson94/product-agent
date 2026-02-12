@@ -108,8 +108,8 @@ STACKS: dict[StackId, StackDefinition] = {
         id="swift-swiftui",
         name="Swift + SwiftUI",
         description="Native iOS with Swift Package plugin architecture. Best for iOS apps with modular features.",
-        product_types=["ios_app", "plugin_module", "native_app"],
-        features=["local_storage", "compression", "swift_packages", "swiftui", "xctest"],
+        product_types=["ios_app", "plugin_module", "native_app", "widget", "app_clip", "utility_app"],
+        features=["local_storage", "compression", "swift_packages", "swiftui", "xctest", "swiftdata"],
         complexity="medium-high",
         deployment="testflight",
         # v7.0 fields
@@ -154,6 +154,9 @@ PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
     "ios_app": ["swift-swiftui"],
     "plugin_module": ["swift-swiftui"],
     "native_app": ["swift-swiftui"],
+    "widget": ["swift-swiftui"],
+    "app_clip": ["swift-swiftui"],
+    "utility_app": ["swift-swiftui"],
 
     # NoCloud BS (v7.0)
     "nocloud": ["swift-swiftui"],
@@ -193,6 +196,7 @@ FEATURE_REQUIREMENTS: dict[str, list[StackId]] = {
     "local_storage": ["swift-swiftui"],
     "compression": ["swift-swiftui"],
     "swift_packages": ["swift-swiftui"],
+    "swiftdata": ["swift-swiftui"],
 }
 
 

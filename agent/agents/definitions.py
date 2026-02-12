@@ -8,6 +8,8 @@ and Swift/SwiftUI plugin architecture support (v7.0).
 
 from pathlib import Path
 
+from ..domains import get_domain_for_product_type, get_domain_patterns
+
 
 def _load_template(stack_id: str, template_name: str) -> str:
     """Load a stack template file."""
@@ -22,6 +24,12 @@ ANALYZER_PROMPT = """You are a Technical Analyst who determines the optimal tech
 ## Your Task
 Analyze the product idea and select the best technology stack for implementation.
 CRITICAL: You must also identify the deployment target and ensure database compatibility.
+
+## First: Check for Enriched Prompt (v6.0)
+If PROMPT.md exists in the project directory, read it FIRST. It contains a researched,
+detailed specification produced by the enricher agent and should be treated as the
+PRIMARY specification for analysis — it supersedes the raw idea text for understanding
+what the product needs.
 
 ## Analysis Criteria
 
@@ -169,8 +177,12 @@ DESIGNER_PROMPT = """You are a Product Designer who creates technical designs fo
 ## Your Task
 Read STACK_DECISION.md and create a comprehensive DESIGN.md for the product.
 
-## First: Read Stack Decision
-Read STACK_DECISION.md to understand the selected stack and product requirements.
+## First: Read Stack Decision and Enriched Prompt
+1. Read STACK_DECISION.md to understand the selected stack and product requirements.
+2. If PROMPT.md exists, read it — it contains a detailed, researched specification from
+   the enricher agent and should be your PRIMARY source for understanding features,
+   pages, data models, and content requirements.
+
 Pay special attention to:
 - **Stack ID**: Determines which patterns (web vs Swift) to follow
 - **Build Mode**: `standard` (web), `host` (iOS host app), or `plugin` (Swift Package module)
@@ -289,7 +301,7 @@ For every ViewModel, include:
 ### Plugin Storage Key Convention
 Plugin mode storage keys must be namespaced:
 - `"items"` — top-level collection
-- `"items/\(id)/data"` — item binary data
+- `"items/\\(id)/data"` — item binary data
 - `"settings"` — plugin preferences
 The StorageService automatically scopes to the plugin's directory, so no plugin ID prefix is needed.
 
@@ -759,7 +771,7 @@ eas build --platform all --profile preview
 npx expo export --platform web
 
 # 3. Scan for import.meta in bundle (MUST be zero results)
-grep -r "import\.meta" dist/bundles/ --include="*.js" | grep -v "//" | grep -v "\*"
+grep -r "import\\.meta" dist/bundles/ --include="*.js" | grep -v "//" | grep -v "\\*"
 # If any results → BLOCK deployment. Create DEPLOY_BLOCKED.md:
 # "Web bundle contains import.meta which crashes in non-module scripts.
 #  Fix: Create babel.config.js with import.meta → process.env transform."
@@ -1820,19 +1832,33 @@ def get_agents() -> dict:
     }
 
 
-def get_agent_prompt(agent_name: str, stack_id: str | None = None, build_mode: str | None = None) -> str:
+def get_agent_prompt(
+    agent_name: str,
+    stack_id: str | None = None,
+    build_mode: str | None = None,
+    product_type: str | None = None,
+) -> str:
     """Get an agent's prompt, optionally with stack-specific templates injected.
 
     Args:
         agent_name: The subagent to get the prompt for
         stack_id: Optional stack ID for template injection
         build_mode: Optional build mode ("standard", "host", "plugin") for v7.0 Swift builds
+        product_type: Optional product type for domain pattern injection (v7.0)
     """
     agents = get_agents()
     if agent_name not in agents:
         raise ValueError(f"Unknown agent: {agent_name}")
 
     prompt = agents[agent_name]["prompt"]
+
+    # Inject domain patterns for builder and designer (v7.0)
+    if agent_name in ("builder", "designer") and product_type:
+        domain = get_domain_for_product_type(product_type)
+        if domain:
+            patterns = get_domain_patterns(domain)
+            if patterns:
+                prompt += f"\n\n## Domain Patterns ({domain})\n{patterns}"
 
     # Inject stack templates for builder
     if agent_name == "builder" and stack_id:
