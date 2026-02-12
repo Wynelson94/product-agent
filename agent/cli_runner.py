@@ -1,11 +1,110 @@
-"""CLI runner for Claude Code - uses Claude Pro subscription instead of API credits."""
+"""CLI runner for Claude Code — v8.0.
+
+Uses claude-code-sdk for phase-by-phase orchestration. Keeps the legacy
+subprocess-based run_claude() for backwards compatibility.
+"""
 
 import json
 import subprocess
-import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+
+# ---------------------------------------------------------------------------
+# v8.0: SDK-based phase runner
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PhaseCallResult:
+    """Result from a single SDK phase call."""
+    success: bool
+    result_text: str = ""
+    error: str = ""
+    duration_s: float = 0.0
+    num_turns: int = 0
+    cost_usd: float | None = None
+    session_id: str = ""
+
+
+async def run_phase_call(
+    prompt: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    cwd: str | Path,
+    max_turns: int = 50,
+    model: str | None = None,
+) -> PhaseCallResult:
+    """Run a single phase using claude-code-sdk.
+
+    Each phase gets its own focused Claude call with specific tools
+    and turn limits. This replaces the old monolithic subprocess call.
+
+    Args:
+        prompt: The task-specific prompt for this phase
+        system_prompt: The agent's system prompt (from definitions.py)
+        allowed_tools: Tools to pre-approve for this phase
+        cwd: Working directory (project directory)
+        max_turns: Maximum turns for this phase
+        model: Optional model override
+
+    Returns:
+        PhaseCallResult with success status, output text, and metrics
+    """
+    from claude_code_sdk import query, ClaudeCodeOptions, ResultMessage, AssistantMessage, TextBlock
+
+    start_time = time.time()
+    result_text_parts: list[str] = []
+
+    options = ClaudeCodeOptions(
+        system_prompt=system_prompt,
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
+        cwd=str(cwd),
+        permission_mode="bypassPermissions",
+    )
+    if model:
+        options.model = model
+
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                duration = time.time() - start_time
+                return PhaseCallResult(
+                    success=not message.is_error,
+                    result_text=message.result or "\n".join(result_text_parts),
+                    error="" if not message.is_error else (message.result or "Phase failed"),
+                    duration_s=duration,
+                    num_turns=message.num_turns,
+                    cost_usd=message.total_cost_usd,
+                    session_id=message.session_id,
+                )
+            elif isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        result_text_parts.append(block.text)
+
+        # Stream ended without ResultMessage (shouldn't happen but handle it)
+        duration = time.time() - start_time
+        return PhaseCallResult(
+            success=True,
+            result_text="\n".join(result_text_parts),
+            duration_s=duration,
+        )
+
+    except Exception as e:
+        duration = time.time() - start_time
+        return PhaseCallResult(
+            success=False,
+            error=str(e),
+            duration_s=duration,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Legacy subprocess runner (kept for --legacy mode and backwards compat)
+# ---------------------------------------------------------------------------
 
 def run_claude(
     prompt: str,
@@ -17,7 +116,10 @@ def run_claude(
     timeout: int = 600,
     mcp_config_path: str | None = None,
 ) -> dict[str, Any]:
-    """Run Claude Code CLI and return JSON response.
+    """Run Claude Code CLI via subprocess and return JSON response.
+
+    This is the v7.0 legacy runner. v8.0 uses run_phase_call() instead.
+    Kept for --legacy mode and backwards compatibility.
 
     Args:
         prompt: The prompt to send to Claude
@@ -32,13 +134,14 @@ def run_claude(
     Returns:
         Dict with response data or error information
     """
+    import tempfile
+
     cmd = ["claude", "-p", prompt, "--output-format", "json"]
 
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
 
     if allowed_tools:
-        # Format: --allowedTools "Read,Write,Bash"
         cmd.extend(["--allowedTools", ",".join(allowed_tools)])
 
     cmd.extend(["--max-turns", str(max_turns)])

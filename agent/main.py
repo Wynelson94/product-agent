@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Product Agent v7.0 - Autonomous app builder.
+"""Product Agent v8.0 - Autonomous app builder.
 
-Uses Claude Code CLI (via Claude Pro subscription) to build web and native iOS apps.
-Includes deployment-aware stack selection, automated testing, post-deploy verification,
-spec auditing (v6.0), optional prompt enrichment (v6.0), and Swift/SwiftUI plugin
-architecture with host/plugin build modes (v7.0).
+Uses claude-code-sdk for phase-by-phase orchestration. Each phase gets its own
+focused Claude call. Python validates between phases, handles retries with error
+injection, and streams progress in real time.
+
+v8.0: Phase-by-phase orchestration, parallel audit+test, build memory, quality scoring
+v7.0: Swift/SwiftUI plugin architecture with host/plugin build modes
+v6.0: Spec auditing, optional prompt enrichment
+v5.0: Deployment-aware stack selection, automated testing, post-deploy verification
 
 Usage:
     python -m agent.main "Build me a todo app"
@@ -17,6 +21,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import os
 import re
 import sys
@@ -29,6 +34,7 @@ from .state import AgentState, Phase, ReviewStatus, create_initial_state, get_ne
 from .checkpoints import CheckpointManager, save_checkpoint, resume_from_checkpoint
 from .recovery import get_build_fix_prompt, get_deploy_fix_prompt
 from .stacks.selector import select_stack, get_all_stacks_for_prompt
+from .orchestrator import BuildConfig, BuildResult, build_product as build_product_v8
 from . import config
 
 # Hard-coded retry limits (enforced, not just documented)
@@ -529,8 +535,12 @@ def build_product(
     enrich: bool = False,
     enrich_url: str | None = None,
     build_mode: str = "standard",
+    verbose: bool = False,
 ) -> str | None:
     """Run the autonomous product agent.
+
+    v8.0: Uses phase-by-phase orchestration via claude-code-sdk by default.
+    Pass legacy_mode=True to use the v7.0 single-call architecture.
 
     Args:
         idea: The product idea to build
@@ -539,16 +549,42 @@ def build_product(
         force_stack: Force a specific stack (e.g., "nextjs-prisma")
         resume: If True, resume from the latest checkpoint
         resume_checkpoint: Specific checkpoint ID to resume from
-        legacy_mode: If True, use v3.0 linear flow with fixed stack
+        legacy_mode: If True, use v7.0 single-call architecture
         design_file: Path to existing DESIGN.md to enhance (enables enhancement mode)
         enhance_features: List of features to add (e.g., ["board-views", "dashboards"])
         enrich: If True, run prompt enrichment phase before analysis (v6.0)
         enrich_url: Optional reference URL for enrichment research (v6.0)
         build_mode: Build mode - "standard", "host", or "plugin" (v7.0)
+        verbose: If True, show detailed progress output
 
     Returns:
         The final result message (deployment URL) or None if failed
     """
+    # v8.0: Use new phase-by-phase orchestrator unless legacy mode
+    if not legacy_mode:
+        build_cfg = BuildConfig(
+            stack=force_stack,
+            mode=build_mode if not design_file else "enhancement",
+            enrich=enrich,
+            enrich_url=enrich_url,
+            verbose=verbose,
+            require_tests=config.REQUIRE_PASSING_TESTS,
+            design_file=design_file,
+            enhance_features=enhance_features or [],
+        )
+        result = asyncio.run(build_product_v8(idea, project_dir, build_cfg))
+        if result.success:
+            parts = []
+            if result.url:
+                parts.append(f"Your app is live at {result.url}")
+            if result.test_count:
+                parts.append(f"Tests: {result.test_count}")
+            if result.quality:
+                parts.append(f"Quality: {result.quality}")
+            return " - ".join(parts) if parts else "Build complete"
+        else:
+            print(f"Build failed: {result.reason}", file=sys.stderr)
+            return None
     import shutil
     # Ensure project directory exists
     project_path = Path(project_dir).resolve()
@@ -648,14 +684,15 @@ def build_product(
     mcp_config_path = _write_mcp_config(project_path)
 
     # Select system prompt based on mode
+    # Plugin/host modes take priority over generic legacy
     if enhancement_mode:
         system_prompt = ENHANCEMENT_ORCHESTRATOR_PROMPT
-    elif legacy_mode:
-        system_prompt = LEGACY_ORCHESTRATOR_PROMPT
     elif build_mode == "plugin":
         system_prompt = PLUGIN_ORCHESTRATOR_PROMPT
     elif build_mode == "host":
         system_prompt = HOST_ORCHESTRATOR_PROMPT
+    elif legacy_mode:
+        system_prompt = LEGACY_ORCHESTRATOR_PROMPT
     else:
         system_prompt = ORCHESTRATOR_SYSTEM_PROMPT
 
@@ -721,18 +758,6 @@ Add workflow automation system:
 
 Start now by reading DESIGN.md, then use the enhancer."""
 
-    elif legacy_mode:
-        prompt = f"""Build this product: {idea}
-
-Project directory: {project_path}
-
-Process:
-1. First, use the designer subagent to create DESIGN.md
-2. Then, use the builder subagent to implement the app
-3. Finally, use the deployer subagent to deploy to Vercel
-
-Start now with the designer."""
-
     elif build_mode == "plugin":
         # v7.0: Plugin build mode
         limits_context = _get_phase_limits_context(state)
@@ -795,6 +820,18 @@ Build the NoCloud BS host app with:
 7. Verify `swift build` and `swift test` pass
 
 Start now with the analyzer."""
+
+    elif legacy_mode:
+        prompt = f"""Build this product: {idea}
+
+Project directory: {project_path}
+
+Process:
+1. First, use the designer subagent to create DESIGN.md
+2. Then, use the builder subagent to implement the app
+3. Finally, use the deployer subagent to deploy to Vercel
+
+Start now with the designer."""
 
     else:
         # Standard prompt with stack selection
@@ -923,7 +960,7 @@ Start now with the {"enricher" if enrich and config.ENABLE_PROMPT_ENRICHMENT els
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Product Agent v7.0 - Build web and native iOS apps from ideas",
+        description="Product Agent v8.0 - Build web and native iOS apps from ideas",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1093,7 +1130,7 @@ Requirements:
 
     # Run the agent
     print("=" * 60, file=sys.stderr)
-    print("PRODUCT AGENT v7.0 - Autonomous Builder", file=sys.stderr)
+    print("PRODUCT AGENT v8.0 - Autonomous Builder", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
     print("", file=sys.stderr)
 
@@ -1120,6 +1157,7 @@ Requirements:
         enrich=enrich,
         enrich_url=args.enrich_url,
         build_mode=args.mode,
+        verbose=getattr(args, 'verbose', False),
     )
 
     if result:

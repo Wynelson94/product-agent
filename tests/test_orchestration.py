@@ -391,13 +391,14 @@ class TestBuildModeSelection:
     @patch("agent.main.run_claude")
     @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
     def test_plugin_mode_sets_swift_stack(self, _mock_cli, mock_run, tmp_path):
-        """Plugin mode should set stack to swift-swiftui."""
+        """Plugin mode should set stack to swift-swiftui (legacy path)."""
         mock_run.return_value = {"success": True, "result": "Plugin package ready at /tmp/test - Tests: PASSED - swift build: OK"}
 
         build_product(
             idea="Photo gallery plugin",
             project_dir=str(tmp_path / "plugin-proj"),
             build_mode="plugin",
+            legacy_mode=True,
         )
 
         # Verify the prompt passed to run_claude mentions swift-swiftui
@@ -408,13 +409,14 @@ class TestBuildModeSelection:
     @patch("agent.main.run_claude")
     @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
     def test_host_mode_sets_swift_stack(self, _mock_cli, mock_run, tmp_path):
-        """Host mode should set stack to swift-swiftui."""
+        """Host mode should set stack to swift-swiftui (legacy path)."""
         mock_run.return_value = {"success": True, "result": "Host app ready at /tmp/test - Tests: PASSED - swift build: OK"}
 
         build_product(
             idea="NoCloud BS host app",
             project_dir=str(tmp_path / "host-proj"),
             build_mode="host",
+            legacy_mode=True,
         )
 
         call_kwargs = mock_run.call_args
@@ -424,11 +426,12 @@ class TestBuildModeSelection:
     @patch("agent.main.run_claude")
     @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
     def test_each_mode_selects_correct_prompt(self, _mock_cli, mock_run, tmp_path):
-        """Each mode should pass its corresponding system prompt to run_claude."""
-        # We test three modes: standard, plugin, legacy
+        """Each mode should pass its corresponding system prompt to run_claude (legacy path)."""
+        # Plugin/host modes get their own prompts even with legacy_mode=True.
+        # Standard mode with legacy_mode=True gets the legacy prompt.
 
         mode_prompt_map = {
-            "standard": ORCHESTRATOR_SYSTEM_PROMPT,
+            "standard": LEGACY_ORCHESTRATOR_PROMPT,
             "plugin": PLUGIN_ORCHESTRATOR_PROMPT,
             "host": HOST_ORCHESTRATOR_PROMPT,
         }
@@ -442,6 +445,7 @@ class TestBuildModeSelection:
                 idea="test idea",
                 project_dir=str(proj),
                 build_mode=mode,
+                legacy_mode=True,
             )
 
             call_kwargs = mock_run.call_args

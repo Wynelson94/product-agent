@@ -1,9 +1,9 @@
 ---
 project: product-agent
-version: "7.0.0"
+version: "8.0.0"
 repo: https://github.com/Wynelson94/product-agent
 last_updated: "2026-02-12"
-last_session_focus: "Full audit + pipeline fixes + 298 new tests"
+last_session_focus: "v8.0 rewrite — phase-by-phase orchestration, build memory, quality scoring, 1239 tests"
 ---
 
 # Product Agent — Session Context
@@ -93,24 +93,42 @@ Full reference: `reference/nocloud/APP_CONTEXT.md`
 
 ```yaml
 description: Autonomous AI agent that builds, tests, and deploys apps from plain English
-version: "7.0.0"
+version: "8.0.0"
 runtime_dep: claude-code-sdk >= 0.1.0
-test_count: 634 (all passing)
+test_count: 1239 (all passing)
+
+architecture: |
+  v8.0 — Phase-by-phase orchestration. Python controls the pipeline,
+  Claude does the creative work. Each phase is its own SDK call with
+  code-level validation between phases. Smart retry with error injection,
+  parallel audit+test, build memory, quality scoring.
+
+  v7.0 legacy mode still available via legacy_mode=True parameter.
 
 stacks:
   - nextjs-supabase (default web)
   - nextjs-prisma (marketplaces)
   - rails (rapid prototyping)
   - expo-supabase (mobile)
-  - swift-swiftui (native iOS, NoCloud plugins) # v7.0
+  - swift-swiftui (native iOS, NoCloud plugins)
 
 build_modes:
-  standard: Full 8-phase pipeline (analyze → design → review → build → audit → test → deploy → verify)
+  standard: Full 9-phase pipeline (enrich → analyze → design → review → build → audit+test → deploy → verify)
   plugin: Builds Swift Package modules conforming to NCBSPlugin protocol
   host: Builds iOS host app with plugin infrastructure
   enhancement: Adds features to existing designs
 
 subagents: 10 (enricher, analyzer, designer, reviewer, builder, auditor, tester, deployer, verifier, enhancer)
+
+v8_modules:
+  orchestrator: agent/orchestrator.py — BuildConfig, BuildResult, build_product() async pipeline
+  phases: agent/phases/ — 9 phase modules (enrich, analyze, design, review, build, audit, test, deploy, verify)
+  validators: agent/validators.py — Code-level output validation between phases
+  progress: agent/progress.py — Real-time progress streaming (phase-by-phase)
+  history: agent/history.py — Build memory (append-only JSONL, Jaccard similarity search)
+  quality: agent/quality.py — 5-factor quality scoring (A/B/C/F grades)
+  api: agent/api.py — Clean public API (build() async function)
+  cli_runner: agent/cli_runner.py — SDK-based run_phase_call() + legacy run_claude()
 
 plugin_architecture:
   protocol: NCBSPlugin
@@ -180,6 +198,65 @@ result: swift test now finds XCTest framework
 
 ## What Was Done This Session (2026-02-12)
 
+### Product Agent v8.0 Rewrite
+
+```yaml
+status: COMPLETE
+grade_before: B+ (634 tests, monolithic single-subprocess architecture)
+grade_after: A (1239 tests, phase-by-phase orchestration, build memory, quality scoring)
+tests_before: 634
+tests_after: 1239 (605 new tests added)
+
+core_change: |
+  Replaced monolithic single-subprocess architecture with phase-by-phase
+  orchestration using claude-code-sdk. Python now controls the pipeline,
+  validates between phases, retries with error injection, and streams
+  real-time progress. Each of the 9 phases is its own Claude SDK call.
+
+new_files_created:
+  agent/orchestrator.py: BuildConfig, BuildResult, build_product() async pipeline
+  agent/phases/__init__.py: Phase registry, PhaseConfig, run_phase() dispatcher
+  agent/phases/enrich.py: Enricher phase (prompt enhancement)
+  agent/phases/analyze.py: Stack analysis phase
+  agent/phases/design.py: Architecture design phase
+  agent/phases/review.py: Design review phase (approve/revise loop)
+  agent/phases/build.py: Build phase (most complex, smart retry)
+  agent/phases/audit.py: Spec audit phase
+  agent/phases/test.py: Test generation + execution phase
+  agent/phases/deploy.py: Deployment phase
+  agent/phases/verify.py: Post-deploy verification phase
+  agent/validators.py: Code-level output validation between phases
+  agent/progress.py: Real-time progress streaming (ProgressReporter)
+  agent/history.py: Build memory (JSONL log, Jaccard similarity search)
+  agent/quality.py: 5-factor quality scoring (tests, spec, efficiency, design, verification)
+  agent/api.py: Clean public API — build() async function
+
+files_modified:
+  agent/cli_runner.py: Added SDK-based run_phase_call() alongside legacy run_claude()
+  agent/main.py: v8.0 routing (legacy_mode=True → old path), reordered elif chain for plugin/host
+  pyproject.toml: Version bumped 7.0.0 → 8.0.0
+
+new_test_files:
+  tests/test_validators.py: 93 tests (all 9 phase validators, dispatcher, extraction)
+  tests/test_progress.py: 55 tests (PhaseResult, ProgressReporter, formatting)
+  tests/test_history.py: 64 tests (BuildRecord, BuildHistory, similarity search)
+  tests/test_quality.py: 77 tests (scoring factors, grade boundaries, report formatting)
+  tests/test_phases.py: ~70 tests (phase registry, PhaseConfig, run_phase with mocked SDK)
+  tests/test_orchestrator_v8.py: 114 tests (full pipeline, retry, quality gate, parallel phases)
+
+key_features:
+  - Phase-by-phase orchestration (9 phases, each its own SDK call)
+  - Code-level validation between phases (file existence, content checks)
+  - Smart retry with error injection (failed phase gets error context prepended)
+  - Parallel audit + test execution (asyncio.gather)
+  - Design → Review loop (max 3 revisions before proceeding)
+  - Build memory (append-only JSONL, find similar past builds)
+  - Quality scoring (A/B/C/F grades, 5 weighted factors)
+  - Real-time progress streaming to stderr
+  - Clean public API (agent.api.build())
+  - Full backward compatibility (legacy_mode=True → v7.0 single-call path)
+```
+
 ### Full Audit of Product Agent v7.0
 
 ```yaml
@@ -219,8 +296,15 @@ new_test_files:
 
 ```yaml
 immediate:
+  - End-to-end test: run `product-agent "Build a todo app"` to verify full v8.0 pipeline
   - Wait for Taylor's feedback on Quick Notes plugin integration
   - If it works: proceed to Terms & Conditions Reviewer plugin design
+
+v8_follow_up:
+  - Add GitHub Actions CI (.github/workflows/tests.yml) for 1239 tests
+  - Wrap as Claude Code skill (.claude/skills/build/SKILL.md) or MCP server
+  - LLM-powered stack pre-classification (replace keyword heuristic)
+  - Run parallel builds to stress-test the phase orchestration
 
 planned_plugin:
   name: Terms & Conditions Reviewer
@@ -237,8 +321,6 @@ planned_plugin:
 ongoing:
   - Keep reference/nocloud/APP_CONTEXT.md updated as Taylor shares more details
   - Update domain patterns as we learn from plugin integration testing
-  - Product Agent v7.1 improvements based on plugin build experience
-  - Consider adding GitHub Actions CI (.github/workflows/tests.yml)
 ```
 
 ---
@@ -250,8 +332,18 @@ ongoing:
 session_context: SESSION_CONTEXT.md          # This file
 nocloud_reference: reference/nocloud/APP_CONTEXT.md  # Full NoCloud app details
 
-# Agent architecture
-orchestrator: agent/main.py                  # 4 build modes, 8 phases
+# v8.0 architecture (NEW)
+orchestrator_v8: agent/orchestrator.py       # BuildConfig, BuildResult, build_product() pipeline
+phases: agent/phases/                        # 9 phase modules + registry (__init__.py)
+validators: agent/validators.py              # Code-level output validation between phases
+progress: agent/progress.py                  # Real-time progress streaming
+history: agent/history.py                    # Build memory (JSONL log, similarity search)
+quality: agent/quality.py                    # 5-factor quality scoring
+api: agent/api.py                            # Clean public API — build() function
+cli_runner: agent/cli_runner.py              # SDK-based run_phase_call() + legacy run_claude()
+
+# Legacy architecture (still works via legacy_mode=True)
+main: agent/main.py                          # CLI entry, v8/legacy routing, 4 build modes
 subagents: agent/agents/definitions.py       # 10 subagent prompts (1873 lines)
 stack_selector: agent/stacks/selector.py     # How stacks are chosen
 
@@ -267,14 +359,20 @@ domain_registry: agent/domains/__init__.py
 quick_notes: projects/quick-notes/           # Complete built plugin
 quick_notes_repo: https://github.com/Wynelson94/NCBSQuickNotes
 
-# Tests (634 total across 11 files)
-agent_tests: tests/                          # 634 tests (11 files)
-test_orchestration: tests/test_orchestration.py    # Phase limits, build modes, prompt content
-test_stack_selection: tests/test_stack_selection.py  # Keyword analysis, scoring, selection
-test_checkpoints: tests/test_checkpoints.py        # Save/load/resume, phase-specific
-test_swift_modes: tests/test_swift_modes.py        # Swift state, criteria, prompts, domains
-test_agent_prompts: tests/test_agent_prompts.py    # Registry, tools, all 10 agent prompts
-test_cli_runner: tests/test_cli_runner.py          # Subprocess mocking, error handling
+# Tests (1239 total across 17 files)
+agent_tests: tests/                                # 1239 tests (17 files)
+test_orchestrator_v8: tests/test_orchestrator_v8.py  # Full v8 pipeline (114 tests)
+test_phases: tests/test_phases.py                    # Phase registry, run_phase (~70 tests)
+test_validators: tests/test_validators.py            # Phase validators (93 tests)
+test_progress: tests/test_progress.py                # Progress streaming (55 tests)
+test_history: tests/test_history.py                  # Build memory (64 tests)
+test_quality: tests/test_quality.py                  # Quality scoring (77 tests)
+test_orchestration: tests/test_orchestration.py      # Legacy orchestration (34 tests)
+test_stack_selection: tests/test_stack_selection.py   # Stack selection (44 tests)
+test_checkpoints: tests/test_checkpoints.py          # Checkpoints (30 tests)
+test_swift_modes: tests/test_swift_modes.py          # Swift modes (85 tests)
+test_agent_prompts: tests/test_agent_prompts.py      # Agent prompts (60 tests)
+test_cli_runner: tests/test_cli_runner.py            # CLI runner (19 tests)
 ```
 
 ---
