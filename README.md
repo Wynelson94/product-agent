@@ -1,48 +1,61 @@
-# Product Agent v7.0
+# Product Agent v8.0
 
 An autonomous AI agent that builds, tests, and deploys web and native iOS applications from plain English descriptions.
 
 ## What It Does
 
 ```bash
-python -m agent.main "Build me a todo app with user authentication"
+product-agent "Build me a todo app with user authentication"
 ```
 
 **Output:**
 ```
-Your app is live at https://todo-app-abc123.vercel.app - Tests: PASSED - Verification: PASSED
+Product Agent v8.0 — Building: "Build me a todo app with user authentication"
+
+[1/9] Enriching prompt...                    done   12s
+[2/9] Analyzing stack... → nextjs-supabase   done    8s
+[3/9] Designing architecture...              done   45s
+[4/9] Reviewing design... APPROVED           done   15s
+[5/9] Building application...                done 3m22s
+[6/9] Auditing spec... 12/12 met             done   20s  (parallel)
+[7/9] Running tests... 14/14 passed          done   35s  (parallel)
+[8/9] Deploying to Vercel...                 done   45s
+[9/9] Verifying deployment...                done   10s
+
+BUILD COMPLETE  5m 42s
+  URL: https://todo-app-abc123.vercel.app
+  Tests: 14/14 passed
+  Spec: 12/12 requirements met
+  Quality: A (95%)
 ```
 
-The agent autonomously:
-1. **Enriches** your idea with research (optional, v6.0)
-2. **Analyzes** your idea and selects the optimal tech stack
-3. **Designs** the data model, pages, and components
-4. **Reviews** the design for completeness
-5. **Builds** a complete application, cross-referencing the original prompt
-6. **Audits** the build against the original requirements (v6.0)
-7. **Tests** the application with generated tests
-8. **Deploys** to production
-9. **Verifies** the deployment works correctly
+One prompt in, production app out. No human intervention required.
 
-No human intervention required.
+## What's New in v8.0
 
-## What's New in v7.0
+The core architectural change: **Python controls the pipeline, Claude does the creative work.**
 
-- **Swift/SwiftUI Stack** — New `swift-swiftui` stack for native iOS development. Build complete iOS apps and modular Swift Package plugins.
-- **Plugin Build Mode** — New `--mode` flag (`host` or `plugin`) for building the NoCloud BS plugin host app or individual Swift Package modules.
-- **NCBSPlugin Protocol** — Standard interface that all generated plugins conform to, with shared services (compression, storage, network) via PluginContext.
-- **XCTest Integration** — Automated test generation for Swift with minimum 8 tests (plugins) or 15 tests (host app).
-- **TestFlight Deployment** — Host apps can be archived and uploaded to TestFlight. Plugins are distributed as tagged Swift Packages.
+- **Phase-by-Phase Orchestration** — Each of 9 phases is its own Claude SDK call. Python validates between phases, enforces ordering, and manages state. No more hoping a single 200-turn subprocess gets everything right.
+- **Smart Retry with Error Injection** — When a phase fails, the error context is injected into the retry prompt. The agent learns from its mistakes instead of repeating them.
+- **Parallel Audit + Test** — Spec audit and test execution run concurrently via `asyncio.gather`, saving 20-60 seconds per build.
+- **Build Memory** — Every build is logged to `.agent_history/builds.jsonl`. Before starting a new build, the agent finds similar past builds and learns from their patterns and mistakes.
+- **Quality Scoring** — 5-factor weighted scoring (tests, spec coverage, build efficiency, design quality, verification) produces A/B/C/F grades with detailed breakdowns.
+- **Real-Time Progress** — Phase-by-phase streaming output so you always know what's happening.
+- **Code-Level Validation** — Python checks that each phase produced its required artifacts before proceeding. No more "the LLM says it created the file."
+- **claude-code-sdk** — Uses the Python SDK instead of subprocess calls. Async, streaming, structured errors.
+- **Clean Public API** — `from agent.api import build` for programmatic use.
 
-### Previous: v6.0
-- Spec Audit, Original Prompt Passthrough, Prompt Enrichment, Upgraded Testing, Content Site Domain.
+### Previous Versions
+- **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest integration
+- **v6.0** — Spec audit, prompt enrichment, original prompt passthrough, content site domain
+- **v5.0** — Deployment validation, verification, checkpoints, automated testing
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-cd /Users/natenelson/Projects/product-agent
+cd product-agent
 pip install -e .
 ```
 
@@ -58,7 +71,7 @@ export VERCEL_TOKEN=...              # Optional - Vercel MCP
 ### 3. Run
 
 ```bash
-python -m agent.main "Build me a simple blog"
+product-agent "Build me a simple blog"
 ```
 
 ## Available Stacks
@@ -71,254 +84,186 @@ The agent automatically selects the best stack for your product:
 | **nextjs-prisma** | Marketplaces, multi-tenant, complex data | PostgreSQL | Vercel |
 | **rails** | Rapid prototyping, admin-heavy apps | PostgreSQL | Railway |
 | **expo-supabase** | Mobile apps, consumer apps | PostgreSQL (Supabase) | App Stores |
-| **swift-swiftui** (v7.0) | Native iOS apps, plugin modules | Local storage | TestFlight / SPM |
+| **swift-swiftui** | Native iOS apps, plugin modules | Local storage | TestFlight / SPM |
 
 Force a specific stack:
 ```bash
-python -m agent.main --stack nextjs-prisma "Build a freelancer marketplace"
+product-agent --stack nextjs-prisma "Build a freelancer marketplace"
 ```
 
 ## How It Works
 
-### Architecture
+### Architecture (v8.0)
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ORCHESTRATOR                                │
-│                    (Main Product Agent v7.0)                        │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-    ┌────────┬────────┬────────┬┴───────┬────────┬────────┬────────┬────────┬────────┐
-    ▼        ▼        ▼        ▼        ▼        ▼        ▼        ▼        ▼        ▼
-┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐
-│ENRICHER││ANALYZER││DESIGNER││REVIEWER││BUILDER ││AUDITOR ││ TESTER ││DEPLOYER││VERIFIER││ENHANCER│
-│ (v6.0) ││        ││        ││        ││        ││ (v6.0) ││ (v5.1) ││        ││ (v5.0) ││        │
-└────────┘└────────┘└────────┘└────────┘└────────┘└────────┘└────────┘└────────┘└────────┘└────────┘
-    │         │         │         │         │         │         │         │         │
-    ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼         ▼
- PROMPT.md  STACK    DESIGN    REVIEW   App Code   SPEC     TEST      Vercel   VERIFY
- (opt-in)  DECISION   .md       .md   + ORIGINAL  AUDIT   RESULTS.md   URL      .md
-             .md                       PROMPT.md    .md
+User → build_product() →
+  ┌─────────────────────────────────────────────────────────────┐
+  │                   PYTHON ORCHESTRATOR                        │
+  │                  (agent/orchestrator.py)                     │
+  │                                                             │
+  │  run_phase(ENRICH)   → validate → checkpoint → progress     │
+  │  run_phase(ANALYZE)  → validate → checkpoint → progress     │
+  │  run_phase(DESIGN)  ←→ run_phase(REVIEW) loop              │
+  │  run_phase(BUILD)    → validate → retry with error context  │
+  │  run_phase(AUDIT)  ┐                                        │
+  │  run_phase(TEST)   ┘→ parallel → validate → progress       │
+  │  run_phase(DEPLOY)   → validate → checkpoint → progress     │
+  │  run_phase(VERIFY)   → validate → checkpoint → progress     │
+  └─────────────────────────────────────────────────────────────┘
+→ BuildResult with URL, quality score, metrics
 ```
 
-### Workflow (8 Phases)
+Each `run_phase()` is its own Claude SDK call with:
+- Phase-specific prompt, tools, and turn limits
+- Code-level output validation (file existence, content checks)
+- Smart retry with error injection on failure
+- Real-time progress streaming
 
-1. **Enrich** (optional) → Researches domain and expands idea into detailed spec
-2. **Analysis** → Selects stack, validates deployment compatibility
-3. **Design** → Creates architecture (with review loop, max 2 revisions)
-4. **Build** → Implements app, cross-references original prompt (max 5 attempts)
-5. **Audit** → Verifies build matches original requirements (max 1 fix attempt)
-6. **Test** → Generates and runs tests including content verification (max 3 attempts)
-7. **Deploy** → Deploys to production (with pre-validation)
-8. **Verify** → Tests deployed app functionality
+### Pipeline Phases
+
+| # | Phase | What It Does | Validates |
+|---|-------|-------------|-----------|
+| 1 | **Enrich** (optional) | Researches domain, expands idea into detailed spec | PROMPT.md exists, 100+ chars |
+| 2 | **Analyze** | Selects optimal tech stack | STACK_DECISION.md with valid stack ID |
+| 3 | **Design** | Creates data model, pages, components | DESIGN.md with required sections |
+| 4 | **Review** | Validates design (loop, max 3 revisions) | REVIEW.md with APPROVED/NEEDS_REVISION |
+| 5 | **Build** | Implements full application (max 5 attempts) | Source files exist, entry point present |
+| 6 | **Audit** | Verifies build matches requirements | SPEC_AUDIT.md with pass/fail counts |
+| 7 | **Test** | Generates and runs tests | TEST_RESULTS.md with pass/fail counts |
+| 8 | **Deploy** | Deploys to production | Deployment URL extracted |
+| 9 | **Verify** | Tests deployed app | VERIFICATION.md with status |
+
+Audit and Test run in parallel. Design loops with Review until approved.
 
 ### Subagents
 
-| Agent | Purpose | When Used |
+| Agent | Purpose | Max Turns |
 |-------|---------|-----------|
-| **enricher** | Researches domain, expands rough ideas into detailed specs | First (if `--enrich`, v6.0) |
-| **analyzer** | Selects stack, validates deployment compatibility | First (or after enricher) |
-| **designer** | Creates DESIGN.md with data model, pages, components | After analysis |
-| **reviewer** | Validates design completeness | After design |
-| **builder** | Implements app, cross-references ORIGINAL_PROMPT.md | After approval |
-| **auditor** | Verifies build matches original prompt, produces SPEC_AUDIT.md | After build (v6.0) |
-| **tester** | Generates and runs tests (route, content, nav, form) | After audit |
-| **deployer** | Deploys with pre-validation | After tests pass |
-| **verifier** | Tests deployed app | After deployment |
-| **enhancer** | Adds features to existing designs | Enhancement mode |
+| **enricher** | Researches domain, expands ideas into specs | 20 |
+| **analyzer** | Selects stack, validates compatibility | 15 |
+| **designer** | Creates DESIGN.md with architecture | 25 |
+| **reviewer** | Validates design completeness | 15 |
+| **builder** | Implements app with cross-referencing | 80 |
+| **auditor** | Audits build against original requirements | 20 |
+| **tester** | Generates and runs tests | 30 |
+| **deployer** | Deploys with pre-validation | 25 |
+| **verifier** | Tests deployed app | 15 |
+| **enhancer** | Adds features to existing designs | 40 |
 
 ## Usage Examples
 
 ### Basic (Fully Autonomous)
 
 ```bash
-python -m agent.main "Build a task management app"
+product-agent "Build a task management app"
 ```
 
-### With Prompt Enrichment (v6.0)
+### With Prompt Enrichment
 
-Research a reference site and build from it:
 ```bash
-python -m agent.main --enrich-url "https://example-nonprofit.org" \
+product-agent --enrich "Build a dental charity nonprofit website"
+```
+
+Research a reference site:
+```bash
+product-agent --enrich-url "https://example-nonprofit.org" \
   "Rebuild this nonprofit website"
 ```
 
-Or just enrich from web research:
-```bash
-python -m agent.main --enrich "Build a dental charity nonprofit website"
+### Programmatic API (v8.0)
+
+```python
+from agent.api import build, BuildConfig
+
+result = await build(
+    idea="Create a marketplace for vintage guitars",
+    config=BuildConfig(
+        stack="nextjs-prisma",
+        enrich=True,
+        require_passing_tests=True,
+    ),
+)
+
+print(result.url)          # https://vintage-guitars.vercel.app
+print(result.quality)      # A- (92%)
+print(result.test_count)   # 14/14
+print(result.duration_s)   # 342.5
 ```
 
-### Custom Project Directory
+### Build Modes
 
 ```bash
-python -m agent.main --project-dir ./my-app "Build a todo app"
-```
+# Standard web app
+product-agent "Build a project management tool"
 
-### Force a Specific Stack
+# Swift plugin module
+product-agent --stack swift-swiftui --mode plugin \
+  "Photo gallery plugin with compressed local albums"
 
-```bash
-python -m agent.main --stack rails "Build an admin dashboard"
-```
+# iOS host app
+product-agent --stack swift-swiftui --mode host \
+  "NoCloud BS host app with plugin system"
 
-### With Checkpoints (Human Approval)
-
-```bash
-python -m agent.main --checkpoints "Build an e-commerce store"
-```
-
-### Resume from Checkpoint
-
-```bash
-python -m agent.main --resume "Build an e-commerce store"
-```
-
-### Enhancement Mode (Add Features to Existing Design)
-
-```bash
-python -m agent.main \
-  --design-file ./existing-project/DESIGN.md \
-  --enhance-features "board-views,dashboards,automations" \
+# Enhancement mode (add features to existing design)
+product-agent --design-file ./project/DESIGN.md \
+  --enhance-features "board-views,dashboards" \
   "Enhance project management app"
 ```
 
-### Build a Swift Plugin Module (v7.0)
+### Other Options
 
 ```bash
-python -m agent.main --stack swift-swiftui --mode plugin \
-  --project-dir ./projects/photo-gallery \
-  "Photo gallery plugin with compressed local albums"
+# Custom project directory
+product-agent --project-dir ./my-app "Build a todo app"
+
+# Force a specific stack
+product-agent --stack rails "Build an admin dashboard"
+
+# With checkpoints (human approval between phases)
+product-agent --checkpoints "Build an e-commerce store"
+
+# Resume from checkpoint
+product-agent --resume "Build an e-commerce store"
+
+# Legacy mode (v7.0 single-subprocess architecture)
+product-agent --legacy "Build a simple todo app"
+
+# Verbose output
+product-agent --verbose "Build a blog"
 ```
 
-### Build the Host App (v7.0)
+## Build Memory (v8.0)
 
-```bash
-python -m agent.main --stack swift-swiftui --mode host \
-  --project-dir ./projects/nocloudbs-host \
-  "NoCloud BS host app with plugin system and storage dashboard"
+Every build is logged to `.agent_history/builds.jsonl`:
+
+```json
+{
+  "id": "20260212_143022",
+  "idea": "Team todo app with real-time sync",
+  "stack": "nextjs-supabase",
+  "outcome": "success",
+  "total_duration_s": 342,
+  "test_count": 14,
+  "tests_passed": 14,
+  "quality_grade": "A"
+}
 ```
 
-### Legacy Mode (v3.0 - Fixed Stack)
+Before starting a new build, the agent searches for similar past builds using Jaccard similarity and injects patterns from successful builds into the pipeline context.
 
-```bash
-python -m agent.main --legacy "Build a simple todo app"
-```
+## Quality Scoring (v8.0)
 
-## Generated Project Structure
+After all phases complete, a 5-factor quality score is computed:
 
-After running, you get:
+| Factor | Weight | What It Measures |
+|--------|--------|-----------------|
+| Tests | 30 pts | Were tests generated and did they pass? |
+| Spec Coverage | 20 pts | How many requirements were met in audit? |
+| Build Efficiency | 20 pts | How many build attempts were needed? |
+| Design Quality | 15 pts | How many design revisions were needed? |
+| Verification | 15 pts | Was the deployment verified working? |
 
-```
-projects/new-product/
-├── ORIGINAL_PROMPT.md     # Original idea for cross-reference (v6.0)
-├── STACK_DECISION.md      # Stack analysis and selection
-├── DESIGN.md              # Architecture decisions
-├── REVIEW.md              # Design review status
-├── SPEC_AUDIT.md          # Build vs prompt audit results (v6.0)
-├── TEST_RESULTS.md        # Test execution results
-├── VERIFICATION.md        # Deployment verification
-├── .agent_checkpoints/    # Checkpoint files for resume
-├── src/
-│   ├── app/               # Next.js pages
-│   ├── components/        # React components
-│   │   ├── ui/            # Reusable UI components
-│   │   ├── layout/        # Layout components
-│   │   └── features/      # Feature components
-│   ├── lib/               # Utilities and data
-│   │   ├── supabase/      # Supabase clients (or prisma.ts)
-│   │   ├── *-data.ts      # Static data files (content sites)
-│   │   ├── utils.ts       # Helper functions
-│   │   └── validation.ts  # Zod schemas
-│   ├── actions/           # Server actions
-│   ├── types/             # TypeScript types
-│   └── test/              # Test setup
-├── vitest.config.ts       # Test configuration
-├── package.json
-├── prisma/                # (if using nextjs-prisma)
-│   └── schema.prisma
-└── .env.local.example
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API access |
-| `GITHUB_TOKEN` | No | GitHub MCP integration |
-| `SUPABASE_ACCESS_TOKEN` | No | Supabase MCP integration |
-| `VERCEL_TOKEN` | No | Vercel MCP integration |
-
-### Feature Flags
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `ENABLE_CHECKPOINTS` | false | Manual approval at each phase |
-| `ENABLE_STACK_SELECTION` | true | Automatic stack selection |
-| `ENABLE_DESIGN_REVIEW` | true | Design review loop |
-| `ENABLE_TEST_GENERATION` | true | Generate and run tests |
-| `ENABLE_VERIFICATION` | true | Post-deployment verification |
-| `REQUIRE_PASSING_TESTS` | true | Block deployment if tests fail |
-| `ENABLE_SPEC_AUDIT` | **true** | Spec audit after build (v6.0) |
-| `ENABLE_FUNCTIONAL_TESTS` | **true** | Enhanced test categories (v6.0) |
-| `PASS_ORIGINAL_PROMPT_TO_BUILDER` | **true** | Write ORIGINAL_PROMPT.md for builder (v6.0) |
-| `ENABLE_PROMPT_ENRICHMENT` | **false** | Prompt enrichment phase (v6.0, opt-in) |
-| `LEGACY_MODE` | false | Disable v4.0+ features |
-
-### Iteration Limits
-
-| Limit | Value | Purpose |
-|-------|-------|---------|
-| `MAX_DESIGN_REVISIONS` | 2 | Maximum design revision cycles |
-| `MAX_BUILD_ATTEMPTS` | 5 | Maximum build retry attempts |
-| `MAX_TEST_ATTEMPTS` | 3 | Maximum test retry attempts |
-| `MAX_VERIFICATION_ATTEMPTS` | 2 | Maximum verification retries |
-| `MAX_AUDIT_FIX_ATTEMPTS` | **1** | Maximum audit fix attempts (v6.0) |
-
-## CLI Arguments
-
-```
-python -m agent.main [OPTIONS] IDEA
-
-Arguments:
-  IDEA                      The product idea to build
-
-Options:
-  --project-dir DIR         Project directory (default: ./projects/new-product)
-  --stack STACK             Force stack: nextjs-supabase, nextjs-prisma, rails, expo-supabase, swift-swiftui
-  --mode MODE               Build mode: standard, host, plugin (v7.0)
-  --checkpoints             Enable checkpoints for human approval
-  --resume                  Resume from most recent checkpoint
-  --resume-from ID          Resume from specific checkpoint ID
-  --list-checkpoints        List available checkpoints and exit
-  --legacy                  Use legacy v3.0 mode (fixed stack)
-  --design-file PATH        Existing DESIGN.md for enhancement mode
-  --enhance-features LIST   Comma-separated: board-views,dashboards,automations
-  --enrich                  Enable prompt enrichment phase (v6.0)
-  --enrich-url URL          Reference URL for enrichment research (v6.0, implies --enrich)
-  --verbose                 Show detailed progress
-```
-
-## Domain Patterns
-
-The agent includes domain-specific patterns for different product types:
-
-| Domain | Product Types | Key Patterns |
-|--------|--------------|--------------|
-| **marketplace** | Marketplaces, two-sided platforms | Buyer/seller flows, listings, transactions |
-| **saas** | SaaS, multi-tenant apps | Organizations, subscriptions, billing |
-| **internal_tool** | Admin panels, dashboards | Data tables, CRUD, reporting |
-| **content_site** (v6.0) | Nonprofits, portfolios, marketing sites, blogs, event sites | Static-first data, hero sections, image placeholders, FAQ accordion |
-| **plugin_host** (v7.0) | iOS plugin host apps | Plugin registry, shared services, dynamic TabView |
-| **plugin_module** (v7.0) | Swift Package plugins | NCBSPlugin protocol, MVVM, compressed storage |
-
-## Safety Features
-
-The agent includes safety hooks that:
-- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes)
-- **Protect** system directories and credentials
-- **Auto-approve** safe operations (npm, git, file writes in project)
-- **Validate** deployment compatibility (SQLite + Vercel = blocked)
+Grades: **A** (95+), **A-** (90+), **B+** (85+), **B** (80+), **B-** (70+), **C** (60+), **F** (<60)
 
 ## Development
 
@@ -326,35 +271,49 @@ The agent includes safety hooks that:
 
 ```
 agent/
-├── main.py                 # Orchestrator (v7.0)
+├── main.py                 # CLI entry point, v8/legacy routing
+├── orchestrator.py         # v8.0 — BuildConfig, BuildResult, build_product()
+├── api.py                  # v8.0 — Clean public API
+├── cli_runner.py           # SDK-based run_phase_call() + legacy run_claude()
+├── validators.py           # v8.0 — Code-level output validation
+├── progress.py             # v8.0 — Real-time progress streaming
+├── history.py              # v8.0 — Build memory (JSONL log)
+├── quality.py              # v8.0 — Quality scoring
 ├── config.py               # Environment configuration
 ├── state.py                # Phase and state management
 ├── checkpoints.py          # Checkpoint system
 ├── recovery.py             # Error recovery
 ├── test_validation.py      # Test result parsing
-├── cli_runner.py           # Claude Code CLI runner
+├── phases/                 # v8.0 — Phase modules
+│   ├── __init__.py         # Phase registry, run_phase() dispatcher
+│   ├── enrich.py           # Enricher phase
+│   ├── analyze.py          # Stack analysis phase
+│   ├── design.py           # Design phase
+│   ├── review.py           # Design review phase
+│   ├── build.py            # Build phase
+│   ├── audit.py            # Spec audit phase
+│   ├── test.py             # Test phase
+│   ├── deploy.py           # Deploy phase
+│   └── verify.py           # Verify phase
 ├── agents/
-│   └── definitions.py      # 10 subagent definitions
+│   └── definitions.py      # 10 subagent prompt definitions
 ├── stacks/
-│   ├── criteria.py         # Stack definitions
+│   ├── criteria.py         # Stack definitions and scoring
 │   ├── selector.py         # Stack selection logic
 │   └── templates/          # Stack-specific templates
 │       ├── nextjs-supabase/
 │       ├── nextjs-prisma/
 │       ├── rails/
 │       ├── expo-supabase/
-│       └── swift-swiftui/  # v7.0
+│       └── swift-swiftui/
 ├── domains/
 │   ├── __init__.py         # Domain registry
 │   ├── marketplace/
 │   ├── saas/
 │   ├── internal_tool/
-│   ├── content_site/       # v6.0
-│   │   └── patterns.md
-│   ├── plugin_host/        # v7.0
-│   │   └── patterns.md
-│   └── plugin_module/      # v7.0
-│       └── patterns.md
+│   ├── content_site/
+│   ├── plugin_host/
+│   └── plugin_module/
 ├── hooks/
 │   ├── safety.py           # Safety hooks
 │   └── progress.py         # Progress reporting
@@ -369,20 +328,66 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-304 tests across 5 test files:
-- `test_recovery.py` — Error analysis and recovery prompts
-- `test_safety.py` — Safety hook patterns
-- `test_validation.py` — Test result parsing
-- `test_state_v5.py` — v5.0 state features
-- `test_state_v6.py` — v6.0 phases, fields, serialization, config, domains, agents
+1,239 tests across 17 test files:
 
-### Stack Templates
+| Test File | Tests | Coverage |
+|-----------|-------|---------|
+| `test_orchestrator_v8.py` | 114 | Full v8 pipeline, retry, quality gate, parallel phases |
+| `test_validators.py` | 93 | All 9 phase validators, extraction helpers |
+| `test_swift_modes.py` | 85 | Swift state, criteria, prompts, domains |
+| `test_quality.py` | 77 | Scoring factors, grade boundaries, report formatting |
+| `test_phases.py` | ~70 | Phase registry, PhaseConfig, run_phase with mocked SDK |
+| `test_history.py` | 64 | BuildRecord, BuildHistory, similarity search |
+| `test_agent_prompts.py` | 60 | Registry, tools, all 10 agent prompts |
+| `test_progress.py` | 55 | PhaseResult, ProgressReporter, formatting |
+| `test_stack_selection.py` | 44 | Keyword analysis, scoring, selection |
+| `test_orchestration.py` | 34 | Legacy orchestration, build modes, prompt content |
+| `test_checkpoints.py` | 30 | Save/load/resume, phase-specific |
+| `test_cli_runner.py` | 19 | Subprocess mocking, error handling |
+| + 5 more | ~494 | Recovery, safety, validation, state v5/v6 |
 
-Each stack has templates in `agent/stacks/templates/{stack}/`:
-- `scaffold.md` - Initial setup commands
-- `patterns.md` - Code patterns to follow
-- `deploy.md` - Deployment instructions
-- `tests.md` - Test generation patterns
+### Domain Patterns
+
+| Domain | Product Types | Key Patterns |
+|--------|--------------|--------------|
+| **marketplace** | Marketplaces, two-sided platforms | Buyer/seller flows, listings, transactions |
+| **saas** | SaaS, multi-tenant apps | Organizations, subscriptions, billing |
+| **internal_tool** | Admin panels, dashboards | Data tables, CRUD, reporting |
+| **content_site** | Nonprofits, portfolios, blogs | Static-first data, hero sections, FAQ accordion |
+| **plugin_host** | iOS plugin host apps | Plugin registry, shared services, dynamic TabView |
+| **plugin_module** | Swift Package plugins | NCBSPlugin protocol, MVVM, compressed storage |
+
+## CLI Arguments
+
+```
+product-agent [OPTIONS] IDEA
+
+Arguments:
+  IDEA                      The product idea to build
+
+Options:
+  --project-dir DIR         Project directory (default: ./projects/new-product)
+  --stack STACK             Force stack: nextjs-supabase, nextjs-prisma, rails, expo-supabase, swift-swiftui
+  --mode MODE               Build mode: standard, host, plugin
+  --checkpoints             Enable checkpoints for human approval
+  --resume                  Resume from most recent checkpoint
+  --resume-from ID          Resume from specific checkpoint ID
+  --list-checkpoints        List available checkpoints and exit
+  --legacy                  Use legacy v7.0 mode (single subprocess)
+  --design-file PATH        Existing DESIGN.md for enhancement mode
+  --enhance-features LIST   Comma-separated: board-views,dashboards,automations
+  --enrich                  Enable prompt enrichment phase
+  --enrich-url URL          Reference URL for enrichment research (implies --enrich)
+  --verbose                 Show detailed progress
+```
+
+## Safety Features
+
+The agent includes safety hooks that:
+- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes)
+- **Protect** system directories and credentials
+- **Auto-approve** safe operations (npm, git, file writes in project)
+- **Validate** deployment compatibility (SQLite + Vercel = blocked)
 
 ## Version History
 
@@ -394,17 +399,9 @@ Each stack has templates in `agent/stacks/templates/{stack}/`:
 | v4.0 | Stack selection, design review, iteration limits |
 | v5.0 | Deployment validation, verification, checkpoints |
 | v5.1 | Automated testing, tester agent, test templates |
-| v6.0 | Spec audit, prompt passthrough, enricher agent, content site domain, upgraded testing |
-| **v7.0** | **Swift/SwiftUI stack, plugin build mode (host/plugin), NCBSPlugin protocol, XCTest integration, TestFlight deployment** |
-
-## Example Projects
-
-The `projects/` directory contains example builds:
-- `global-dental-relief/` - Nonprofit website (13 pages, 46 tests)
-- `lacey-real-estate/` - Real estate marketing site
-- `project-manager/` - Project management tool
-- `test-todo/` - Simple todo app
-- `knowledgehub-hr/` - HR knowledge management
+| v6.0 | Spec audit, prompt passthrough, enricher agent, content site domain |
+| v7.0 | Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest |
+| **v8.0** | **Phase-by-phase orchestration, build memory, quality scoring, 1239 tests, public API** |
 
 ## Requirements
 
@@ -412,4 +409,4 @@ The `projects/` directory contains example builds:
 - Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
 - Claude Pro subscription
 - Node.js 18+ (for generated web apps)
-- Swift 5.9+ / Xcode 15+ (for Swift/SwiftUI builds, v7.0)
+- Swift 5.9+ / Xcode 15+ (for Swift/SwiftUI builds)
