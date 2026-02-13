@@ -4,6 +4,7 @@ Uses claude-code-sdk for phase-by-phase orchestration. Keeps the legacy
 subprocess-based run_claude() for backwards compatibility.
 """
 
+import asyncio
 import json
 import subprocess
 import time
@@ -28,30 +29,35 @@ class PhaseCallResult:
     session_id: str = ""
 
 
-async def run_phase_call(
+def _run_phase_in_thread(
     prompt: str,
     system_prompt: str,
     allowed_tools: list[str],
-    cwd: str | Path,
-    max_turns: int = 50,
-    model: str | None = None,
+    cwd: str,
+    max_turns: int,
+    model: str | None,
 ) -> PhaseCallResult:
-    """Run a single phase using claude-code-sdk.
+    """Run a single SDK phase call in its own event loop.
 
-    Each phase gets its own focused Claude call with specific tools
-    and turn limits. This replaces the old monolithic subprocess call.
-
-    Args:
-        prompt: The task-specific prompt for this phase
-        system_prompt: The agent's system prompt (from definitions.py)
-        allowed_tools: Tools to pre-approve for this phase
-        cwd: Working directory (project directory)
-        max_turns: Maximum turns for this phase
-        model: Optional model override
-
-    Returns:
-        PhaseCallResult with success status, output text, and metrics
+    Each call gets a fresh asyncio event loop so that anyio cancel scopes
+    from one phase cannot leak into the next. This works around a
+    Python 3.14 + anyio incompatibility in the claude-code-sdk where
+    cancel scope cleanup runs in a different task context.
     """
+    return asyncio.run(_run_phase_impl(
+        prompt, system_prompt, allowed_tools, cwd, max_turns, model
+    ))
+
+
+async def _run_phase_impl(
+    prompt: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    cwd: str,
+    max_turns: int,
+    model: str | None,
+) -> PhaseCallResult:
+    """Inner async implementation for a single phase call."""
     from claude_code_sdk import query, ClaudeCodeOptions, ResultMessage, AssistantMessage, TextBlock
 
     start_time = time.time()
@@ -61,7 +67,7 @@ async def run_phase_call(
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
         max_turns=max_turns,
-        cwd=str(cwd),
+        cwd=cwd,
         permission_mode="bypassPermissions",
     )
     if model:
@@ -100,6 +106,44 @@ async def run_phase_call(
             error=str(e),
             duration_s=duration,
         )
+
+
+async def run_phase_call(
+    prompt: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    cwd: str | Path,
+    max_turns: int = 50,
+    model: str | None = None,
+) -> PhaseCallResult:
+    """Run a single phase using claude-code-sdk.
+
+    Each phase gets its own focused Claude call with specific tools
+    and turn limits. This replaces the old monolithic subprocess call.
+
+    Each SDK call runs in a separate thread with its own event loop to
+    isolate anyio cancel scopes between phases (Python 3.14 workaround).
+
+    Args:
+        prompt: The task-specific prompt for this phase
+        system_prompt: The agent's system prompt (from definitions.py)
+        allowed_tools: Tools to pre-approve for this phase
+        cwd: Working directory (project directory)
+        max_turns: Maximum turns for this phase
+        model: Optional model override
+
+    Returns:
+        PhaseCallResult with success status, output text, and metrics
+    """
+    return await asyncio.to_thread(
+        _run_phase_in_thread,
+        prompt,
+        system_prompt,
+        allowed_tools,
+        str(cwd),
+        max_turns,
+        model,
+    )
 
 
 # ---------------------------------------------------------------------------

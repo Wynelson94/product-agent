@@ -11,7 +11,7 @@ authors = [
 keywords = ["ai", "agent", "claude", "nextjs", "supabase", "swift", "swiftui", "ios", "automation"]
 
 dependencies = [
-    "claude-code-sdk>=0.1.0",
+    "claude-code-sdk>=0.0.10",
 ]
 
 [project.optional-dependencies]
