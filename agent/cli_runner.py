@@ -1,7 +1,9 @@
-"""CLI runner for Claude Code — v8.0.
+"""CLI runner for Claude Code — v9.0.
 
-Uses claude-code-sdk for phase-by-phase orchestration. Keeps the legacy
-subprocess-based run_claude() for backwards compatibility.
+Two runners:
+1. run_phase_call() — v8.0+ SDK-based runner. Each phase gets its own event loop
+   in a separate thread to prevent anyio cancel scope leaks between phases.
+2. run_claude() — v7.0 legacy subprocess runner. Kept for --legacy mode.
 """
 
 import asyncio
@@ -91,7 +93,8 @@ async def _run_phase_impl(
                     if isinstance(block, TextBlock):
                         result_text_parts.append(block.text)
 
-        # Stream ended without ResultMessage (shouldn't happen but handle it)
+        # Stream ended without ResultMessage — this shouldn't happen in normal
+        # operation, but guard against SDK bugs or dropped connections.
         duration = time.time() - start_time
         return PhaseCallResult(
             success=True,
@@ -209,16 +212,17 @@ def run_claude(
     if mcp_config_path:
         cmd.extend(["--mcp-config", mcp_config_path])
 
-    # Handle agents config - write to temp file if provided
+    # Handle agents config — write to temp file because CLI expects a file path.
+    # Must close() before passing to subprocess to ensure data is flushed to disk.
     agents_file = None
     if agents_config:
         agents_file = tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.json',
-            delete=False
+            delete=False  # Don't auto-delete: we clean up manually after subprocess
         )
         json.dump(agents_config, agents_file)
-        agents_file.close()
+        agents_file.close()  # Flush to disk before subprocess reads it
         cmd.extend(["--agents", agents_file.name])
 
     try:

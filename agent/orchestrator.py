@@ -1,8 +1,11 @@
-"""Orchestrator for Product Agent v8.0.
+"""Orchestrator for Product Agent v9.0.
 
-Replaces the monolithic single-call architecture with a Python-controlled
-phase pipeline. Each phase gets its own focused Claude call. Python validates
-between phases, handles retries with error injection, and streams progress.
+This is the brain of the pipeline. It runs 9 phases sequentially (with Audit+Test
+in parallel), validating output between each phase. If a phase fails, it retries
+with the error injected into the prompt so Claude can learn from the mistake.
+
+Replaces the v7.0 monolithic single-call architecture where one 200-turn subprocess
+did everything. Now Python controls ordering, validation, and retry logic.
 """
 
 import asyncio
@@ -107,8 +110,10 @@ async def build_product(
     def _track_turns(call_result: PhaseCallResult) -> None:
         """Accumulate turns and raise if limit exceeded."""
         nonlocal total_turns
+        # Defensive type check: mocks and SDK edge cases can return non-int num_turns
         turns = call_result.num_turns if isinstance(call_result.num_turns, int) else 0
         total_turns += turns
+        # getattr+isinstance guards against mocked config in tests
         max_turns = getattr(config, 'MAX_TOTAL_TURNS', 300)
         if isinstance(max_turns, int) and total_turns > max_turns:
             raise _TurnLimitExceeded(
@@ -119,6 +124,9 @@ async def build_product(
         # ---------------------------------------------------------------
         # Phase 1: Enrich (optional)
         # ---------------------------------------------------------------
+        # --- Phase 1: Enrich (optional) ---
+        # Researches the domain and expands the one-line idea into a detailed spec.
+        # Non-fatal: if enrichment fails, we just proceed with the raw idea.
         if cfg.enrich:
             if cfg.enrich_url:
                 state.enrichment_source_url = cfg.enrich_url
@@ -134,9 +142,9 @@ async def build_product(
             state.transition_to(Phase.ENRICH, "Enrichment complete")
             checkpoint_mgr.save(state)
 
-        # ---------------------------------------------------------------
-        # Phase 2: Analysis
-        # ---------------------------------------------------------------
+        # --- Phase 2: Analysis ---
+        # Selects the best tech stack for the product idea. Fatal if it fails
+        # because all subsequent phases depend on knowing the stack.
         call, validation = await run_phase(
             Phase.ANALYSIS, state, project_path, progress
         )
@@ -153,9 +161,10 @@ async def build_product(
         state.transition_to(Phase.ANALYSIS, f"Stack: {state.stack_id}")
         checkpoint_mgr.save(state)
 
-        # ---------------------------------------------------------------
-        # Phase 3-4: Design + Review loop
-        # ---------------------------------------------------------------
+        # --- Phase 3-4: Design + Review loop ---
+        # Design creates DESIGN.md, Review validates it. If NEEDS_REVISION,
+        # we loop back to Design (up to max_revisions times). This catches
+        # architectural issues before the expensive Build phase.
         max_revisions = config.MAX_DESIGN_REVISIONS
         approved = False
 
@@ -184,6 +193,7 @@ async def build_product(
 
             if review_validation.extracted.get("approved", True):
                 approved = True
+                # Construct enum value from string — avoids importing ReviewStatus here
                 state.review_status = state.review_status.__class__("approved")
                 break
 
@@ -196,12 +206,13 @@ async def build_product(
         state.transition_to(Phase.REVIEW, "Approved" if approved else "Max revisions")
         checkpoint_mgr.save(state)
 
-        # ---------------------------------------------------------------
-        # Phase 5: Build with smart retry
-        # ---------------------------------------------------------------
+        # --- Phase 5: Build with smart retry ---
+        # The builder implements the full application. If it fails, the error
+        # message is injected into the next attempt's prompt so Claude can
+        # learn from the specific failure (missing imports, wrong patterns, etc.)
         max_attempts = config.MAX_BUILD_ATTEMPTS
         build_succeeded = False
-        retry_context = None
+        retry_context = None  # Error context injected into retry prompts
 
         for attempt in range(max_attempts):
             state.build_attempts = attempt + 1
@@ -223,12 +234,14 @@ async def build_product(
                 progress.log(f"Build attempt {attempt + 1} failed: {error_msg[:200]}")
                 continue
 
-            # v9.0: Route validation — strict on final attempt
+            # Route validation strategy: lenient on early attempts, strict on final.
+            # On retries, missing routes become context for the next attempt.
+            # On final attempt, missing routes are hard errors that fail the build.
             is_final = attempt == max_attempts - 1
             route_check = validate_build_routes(project_path, strict=is_final)
             missing = route_check.extracted.get("missing_routes", [])
             if missing and is_final:
-                # Final attempt: missing routes are errors
+                # Final attempt: missing routes are hard errors
                 for msg in route_check.messages:
                     if "FAIL" in msg:
                         progress.log(msg)
@@ -250,9 +263,10 @@ async def build_product(
         state.transition_to(Phase.BUILD, f"Built in {state.build_attempts} attempt(s)")
         checkpoint_mgr.save(state)
 
-        # ---------------------------------------------------------------
-        # Phase 6-7: Audit + Test (parallel)
-        # ---------------------------------------------------------------
+        # --- Phase 6-7: Audit + Test (parallel) ---
+        # Run both in parallel via asyncio.gather to save 20-60 seconds.
+        # Audit checks if the build matches the original requirements.
+        # Test generates and runs automated tests.
         audit_task = asyncio.create_task(
             run_phase(Phase.AUDIT, state, project_path, progress)
         )
@@ -266,11 +280,12 @@ async def build_product(
         _track_turns(audit_call)
         _track_turns(test_call)
 
-        # Process audit results
+        # Process audit results — compute discrepancies as (total - met)
         state.spec_audit_completed = True
         if audit_validation.extracted.get("requirements_met"):
             met = audit_validation.extracted["requirements_met"]
             total = audit_validation.extracted.get("requirements_total", "?")
+            # Guard: total might be "?" string, only do math if it's an int
             state.spec_audit_discrepancies = max(0, (total if isinstance(total, int) else 0) - met)
         elif audit_validation.extracted.get("discrepancies"):
             state.spec_audit_discrepancies = audit_validation.extracted["discrepancies"]
@@ -289,7 +304,8 @@ async def build_product(
         state.transition_to(Phase.TEST, f"Tests: {test_detail}")
         checkpoint_mgr.save(state)
 
-        # Quality gate: block deploy if tests failed
+        # Quality gate: block deploy if tests failed. This prevents deploying
+        # known-broken code. Can be disabled with require_tests=False.
         if cfg.require_tests and not state.tests_passed:
             if test_validation.extracted.get("all_passed") is False:
                 return _build_failed(
@@ -297,9 +313,10 @@ async def build_product(
                     "Deployment blocked: tests must pass before deploy"
                 )
 
-        # ---------------------------------------------------------------
-        # Phase 8: Deploy
-        # ---------------------------------------------------------------
+        # --- Phase 8: Deploy ---
+        # Deploys to production (Vercel/Railway/TestFlight). Checks for
+        # DEPLOY_BLOCKED.md which the deployer creates if DATABASE_URL is
+        # a placeholder — prevents deploying a broken app.
         call, deploy_validation = await run_phase(
             Phase.DEPLOY, state, project_path, progress
         )
@@ -321,9 +338,9 @@ async def build_product(
             state.transition_to(Phase.DEPLOY, state.deployment_url or "deployed")
             checkpoint_mgr.save(state)
 
-        # ---------------------------------------------------------------
-        # Phase 9: Verify (skip if deploy was blocked)
-        # ---------------------------------------------------------------
+        # --- Phase 9: Verify (skip if deploy was blocked) ---
+        # Tests the deployed app by hitting actual endpoints. Skipped if
+        # deployment was blocked (no point verifying a non-deployed app).
         if not deploy_blocked and not db_placeholder:
             call, verify_validation = await run_phase(
                 Phase.VERIFY, state, project_path, progress
@@ -398,7 +415,9 @@ def _build_failed(progress: ProgressReporter, reason: str, detail: str) -> Build
 
 def _get_phase_count(cfg: BuildConfig) -> int:
     """Get total phase count based on build mode."""
-    base = 9  # analyze, design, review, build, audit, test, deploy, verify = 8, but audit+test count as 2
+    # Base phases: analyze + design + review + build + audit + test + deploy + verify = 8
+    # But we count audit+test as 2 separate phases in the progress display = 9
+    base = 9
     if cfg.enrich:
         base += 1  # add enrichment
     if cfg.mode == "enhancement":
@@ -407,20 +426,30 @@ def _get_phase_count(cfg: BuildConfig) -> int:
 
 
 def _parse_stack_decision(project_path: Path) -> str:
-    """Parse STACK_DECISION.md and extract the stack_id."""
+    """Parse STACK_DECISION.md and extract the stack_id.
+
+    Tries three strategies in order:
+    1. Regex match on "**Stack ID**: `nextjs-supabase`" format
+    2. Substring search for any known stack ID
+    3. Default to nextjs-supabase (safest default — most tested stack)
+    """
     stack_file = project_path / "STACK_DECISION.md"
     if not stack_file.exists():
-        return "nextjs-supabase"
+        return "nextjs-supabase"  # Default: most tested and reliable stack
 
     content = stack_file.read_text()
+
+    # Strategy 1: Parse the structured "**Stack ID**: `value`" line
     match = re.search(r'\*\*Stack ID\*\*:\s*`?(\S+?)`?\s*$', content, re.MULTILINE)
     if match:
         return match.group(1).strip('`')
 
+    # Strategy 2: Look for any known stack ID mentioned anywhere in the file
     for stack_id in ["nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui"]:
         if stack_id in content.lower():
             return stack_id
 
+    # Strategy 3: Fall back to default
     return "nextjs-supabase"
 
 
@@ -432,7 +461,7 @@ def _setup_enhancement_mode(
     if source_design.exists():
         shutil.copy(source_design, project_path / "DESIGN.md")
 
-    # Infer stack from existing design
+    # Infer stack from keywords in existing design (prisma → nextjs-prisma, etc.)
     design_content = (project_path / "DESIGN.md").read_text() if (project_path / "DESIGN.md").exists() else ""
     if "prisma" in design_content.lower():
         state.stack_id = cfg.stack or "nextjs-prisma"

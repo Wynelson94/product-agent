@@ -102,15 +102,17 @@ def compute_quality_score(
     # Compute total
     total = sum(factors.values())
 
-    # Apply hard caps — broken deployments and untested builds cannot score highly
+    # Hard caps prevent "quality theater" — a broken app that happened to build
+    # on the first try would otherwise score 100%. These caps force the grade down
+    # when critical outcomes are missing, regardless of process metrics.
     if not state.deployment_verified:
         if total > 69:
-            total = 69
+            total = 69  # 69 = grade C ceiling (70+ would be B-)
             notes.append("Score capped: deployment not verified (max grade C)")
 
     if not state.tests_generated:
         if total > 79:
-            total = 79
+            total = 79  # 79 = grade B- ceiling (80+ would be B)
             notes.append("Score capped: no tests generated (max grade B-)")
 
     total = max(0, min(100, total))
@@ -166,6 +168,7 @@ def format_quality_report(report: QualityReport) -> str:
     for key, label in labels.items():
         score = report.factors.get(key, 0)
         maximum = max_points.get(key, 0)
+        # Scale score to a 10-character visual bar for compact terminal display
         bar_len = int((score / maximum) * 10) if maximum > 0 else 0
         bar = "█" * bar_len + "░" * (10 - bar_len)
         lines.append(f"  {label:<18} {bar} {score}/{maximum}")

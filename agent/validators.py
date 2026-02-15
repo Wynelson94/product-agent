@@ -208,7 +208,9 @@ def _extract_design_routes(project_dir: Path) -> list[str]:
     # Match markdown table rows with route paths: | /some/route | ...
     for match in re.finditer(r'\|\s*(/[\w/\-\[\]:]*)\s*\|', content):
         route = match.group(1).strip()
-        if route and not route.startswith("/api"):  # Skip API routes
+        # Exclude /api routes — they don't have page.tsx files in Next.js App Router.
+        # API routes are backend endpoints validated separately during build.
+        if route and not route.startswith("/api"):
             routes.append(route)
 
     return routes
@@ -298,6 +300,8 @@ def validate_build_routes(
                 result.add_info(f"Prisma schema: {model_count} models")
 
     # Check for middleware.ts (auth stacks)
+    # If the design mentions "auth", we expect a Next.js middleware file to exist.
+    # middleware.ts handles route protection (redirecting unauthenticated users).
     design = project_dir / "DESIGN.md"
     if design.exists() and "auth" in design.read_text().lower():
         for mw_path in ["src/middleware.ts", "middleware.ts", "src/middleware.js"]:
@@ -305,6 +309,8 @@ def validate_build_routes(
                 result.add_info(f"Auth middleware: {mw_path}")
                 break
         else:
+            # Python for/else: the else block runs when the loop finishes WITHOUT
+            # hitting break — meaning no middleware file was found in any path.
             msg = "Auth mentioned in design but no middleware.ts found"
             if strict:
                 result.add_error(msg)
@@ -524,14 +530,14 @@ def _validate_test(project_dir: Path) -> ValidationResult:
                 result.add_error("Tests FAILED (front-matter)")
         return result
 
-    # Fallback: regex parsing
-    # Extract test counts — try multiple formats
+    # Fallback: regex parsing — try multiple formats because Claude's test output
+    # varies. Each pattern has a lambda extractor to normalize to (passed, total).
     count_patterns = [
-        # "8 / 10 passed" or "8/10 passing"
+        # "8 / 10 passed" or "8/10 passing" (most common format)
         (r'(\d+)\s*/\s*(\d+)\s*(passed|passing)', lambda m: (int(m.group(1)), int(m.group(2)))),
-        # "3 of 10 passed"
+        # "3 of 10 passed" (natural language format)
         (r'(\d+)\s+of\s+(\d+)\s+(passed|passing)', lambda m: (int(m.group(1)), int(m.group(2)))),
-        # "Passed: 8, Failed: 2, Total: 10"
+        # "Passed: 8, Failed: 2, Total: 10" (structured test runner format)
         (r'passed:\s*(\d+).*total:\s*(\d+)', lambda m: (int(m.group(1)), int(m.group(2)))),
     ]
     for pattern, extractor in count_patterns:
@@ -543,6 +549,7 @@ def _validate_test(project_dir: Path) -> ValidationResult:
             result.add_info(f"Tests: {passed}/{total} passed")
             break
     else:
+        # for/else: none of the count patterns matched, try simpler format
         # Try simple format: "12 tests passed"
         match = re.search(r'(\d+)\s+tests?\s+(passed|passing)', content_lower)
         if match:
@@ -570,7 +577,9 @@ def _validate_deploy(project_dir: Path) -> ValidationResult:
         result.add_error(f"Deployment blocked: {content[:200]}")
         return result
 
-    # v9.0: Check for placeholder/localhost DATABASE_URL in deployment files
+    # Check for placeholder/localhost DATABASE_URL in deployment files.
+    # A placeholder DATABASE_URL means the app will crash at runtime when it
+    # tries to connect to the database. We catch this here to fail fast.
     deploy_md = project_dir / "DEPLOYMENT.md"
     if deploy_md.exists():
         deploy_content = deploy_md.read_text()
@@ -580,6 +589,9 @@ def _validate_deploy(project_dir: Path) -> ValidationResult:
             "database_url_here", "postgres://user:password@localhost",
         ]
         for pattern in placeholder_patterns:
+            # Require BOTH the placeholder keyword AND "database_url" mention.
+            # This prevents false positives — "localhost" alone is too generic
+            # (could appear in deploy docs without being a database URL).
             if pattern in deploy_lower and "database_url" in deploy_lower:
                 result.add_error(
                     f"DATABASE_URL appears to be placeholder/localhost — app will be broken at runtime"
@@ -667,7 +679,7 @@ def _validate_verify(project_dir: Path) -> ValidationResult:
             result.add_error("Verification FAILED (front-matter)")
         return result
 
-    # Fallback: keyword search
+    # Fallback: keyword search for pass/fail/success
     if "pass" in content_lower or "success" in content_lower:
         result.extracted["verified"] = True
         result.add_info("Verification PASSED")
@@ -675,6 +687,9 @@ def _validate_verify(project_dir: Path) -> ValidationResult:
         result.extracted["verified"] = False
         result.add_error("Verification FAILED")
     else:
+        # No keywords found → default to False (not True). This prevents
+        # the orchestrator from treating an empty/garbled VERIFICATION.md
+        # as a passing verification. Explicit failure is safer than silent pass.
         result.extracted["verified"] = False
         result.add_error("Verification inconclusive — no pass/fail keywords found")
 
