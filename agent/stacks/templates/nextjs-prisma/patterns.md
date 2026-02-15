@@ -396,6 +396,110 @@ prisma.$use(async (params, next) => {
 })
 ```
 
+## Error Boundary
+
+Create a global error boundary in `src/app/error.tsx`:
+
+```tsx
+'use client'
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  return (
+    <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
+      <h2 className="text-xl font-semibold">Something went wrong</h2>
+      <p className="text-muted-foreground">{error.message}</p>
+      <button onClick={reset} className="rounded bg-primary px-4 py-2 text-primary-foreground">
+        Try again
+      </button>
+    </div>
+  )
+}
+```
+
+## Loading States (Suspense)
+
+Create `src/app/loading.tsx` for route-level loading:
+
+```tsx
+export default function Loading() {
+  return (
+    <div className="flex min-h-[400px] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  )
+}
+```
+
+Use Suspense for component-level loading:
+
+```tsx
+import { Suspense } from 'react'
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<ItemsSkeleton />}>
+      <ItemsList />
+    </Suspense>
+  )
+}
+```
+
+## Empty States
+
+Always handle empty data:
+
+```tsx
+function ItemsList({ items }: { items: Item[] }) {
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-lg font-medium">No items yet</p>
+        <p className="text-muted-foreground">Create your first item to get started.</p>
+      </div>
+    )
+  }
+
+  return items.map((item) => <ItemCard key={item.id} item={item} />)
+}
+```
+
+## Form Validation (Zod)
+
+Use Zod schemas for server-side form validation:
+
+```typescript
+import { z } from 'zod'
+
+const ItemSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(100),
+  description: z.string().max(1000).optional(),
+  email: z.string().email('Invalid email address'),
+})
+
+export async function createItem(
+  prevState: { error?: string } | null,
+  formData: FormData
+) {
+  const parsed = ItemSchema.safeParse({
+    title: formData.get('title'),
+    description: formData.get('description'),
+    email: formData.get('email'),
+  })
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message }
+  }
+
+  // Use parsed.data (typed and validated)
+}
+```
+
 ## Transactions
 
 ```typescript

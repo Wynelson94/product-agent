@@ -1,6 +1,7 @@
 """Safety hooks to block dangerous operations and auto-approve safe ones."""
 
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -159,17 +160,9 @@ def is_command_blocked(command: str) -> tuple[bool, str | None]:
         if re.search(pattern, command, re.IGNORECASE):
             return True, pattern
 
-    # Split on command separators to catch chained attacks
-    # Note: This is a simple split - doesn't handle quoted strings perfectly
-    # but errs on the side of safety
-    separators = [';', '&&', '||']
-    segments = [command]
-
-    for sep in separators:
-        new_segments = []
-        for seg in segments:
-            new_segments.extend(seg.split(sep))
-        segments = new_segments
+    # Split on command separators to catch chained attacks.
+    # Use shell-aware splitting to respect quoted strings.
+    segments = _split_command_segments(command)
 
     # Check each segment individually
     for segment in segments:
@@ -181,6 +174,60 @@ def is_command_blocked(command: str) -> tuple[bool, str | None]:
                 return True, f"{pattern} (in segment)"
 
     return False, None
+
+
+def _split_command_segments(command: str) -> list[str]:
+    """Split a shell command on separators (;, &&, ||) while respecting quotes.
+
+    Uses shlex to validate quoting, then splits unquoted separators using regex.
+    Falls back to naive splitting if the command has unbalanced quotes.
+
+    Returns:
+        List of command segments
+    """
+    # Validate quoting — if quotes are balanced, we can do smart splitting
+    try:
+        shlex.split(command)
+    except ValueError:
+        # Unbalanced quotes — fall back to naive split (safer: may over-split)
+        return _naive_split(command)
+
+    # Replace quoted strings with placeholders to avoid splitting inside them
+    placeholders: list[str] = []
+    protected = command
+
+    # Replace double-quoted strings
+    def _replace_quoted(match: re.Match) -> str:
+        placeholders.append(match.group(0))
+        return f"__PLACEHOLDER_{len(placeholders) - 1}__"
+
+    protected = re.sub(r'"(?:[^"\\]|\\.)*"', _replace_quoted, protected)
+    protected = re.sub(r"'[^']*'", _replace_quoted, protected)
+
+    # Split on unquoted separators
+    parts = re.split(r'\s*(?:&&|\|\||;)\s*', protected)
+
+    # Restore placeholders
+    segments = []
+    for part in parts:
+        restored = part
+        for i, placeholder in enumerate(placeholders):
+            restored = restored.replace(f"__PLACEHOLDER_{i}__", placeholder)
+        segments.append(restored)
+
+    return segments
+
+
+def _naive_split(command: str) -> list[str]:
+    """Fall back to naive splitting on separators."""
+    separators = [';', '&&', '||']
+    segments = [command]
+    for sep in separators:
+        new_segments = []
+        for seg in segments:
+            new_segments.extend(seg.split(sep))
+        segments = new_segments
+    return segments
 
 
 def is_command_safe(command: str) -> bool:

@@ -1,11 +1,13 @@
-"""Checkpoint system for resumable builds in Product Agent v6.0.
+"""Checkpoint system for resumable builds.
 
 Allows saving and restoring agent state for long-running builds.
-Includes verification phase tracking, spec audit, and enrichment state.
+Includes cleanup, archiving, and artifact hashing.
 """
 
 import hashlib
 import json
+import shutil
+import zipfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -171,6 +173,59 @@ class CheckpointManager:
             path.unlink()
             count += 1
         return count
+
+    def cleanup(self, keep_latest: int = 5) -> int:
+        """Delete old checkpoints, keeping only the most recent ones.
+
+        Args:
+            keep_latest: Number of recent checkpoints to keep (default 5)
+
+        Returns:
+            Number of checkpoints deleted
+        """
+        # Get all checkpoint files (excluding latest.json)
+        checkpoint_files = sorted(
+            [p for p in self.checkpoint_dir.glob("*.json") if p.name != "latest.json"],
+            key=lambda p: p.stat().st_mtime,
+        )
+
+        if len(checkpoint_files) <= keep_latest:
+            return 0
+
+        to_delete = checkpoint_files[:-keep_latest]
+        for path in to_delete:
+            path.unlink()
+
+        return len(to_delete)
+
+    def archive(self) -> Optional[Path]:
+        """Archive all checkpoints and agent logs into a zip file.
+
+        Returns:
+            Path to the archive zip file, or None if nothing to archive
+        """
+        archive_name = f"agent_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+        archive_path = self.project_dir / archive_name
+
+        dirs_to_archive = []
+        if self.checkpoint_dir.exists() and any(self.checkpoint_dir.iterdir()):
+            dirs_to_archive.append(self.checkpoint_dir)
+
+        logs_dir = self.project_dir / ".agent_logs"
+        if logs_dir.exists() and any(logs_dir.iterdir()):
+            dirs_to_archive.append(logs_dir)
+
+        if not dirs_to_archive:
+            return None
+
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for dir_path in dirs_to_archive:
+                for file_path in dir_path.rglob("*"):
+                    if file_path.is_file():
+                        arcname = file_path.relative_to(self.project_dir)
+                        zf.write(file_path, arcname)
+
+        return archive_path
 
     def _compute_artifact_hashes(self) -> dict[str, str]:
         """Compute sha256 hashes of all .md artifacts in the project directory.

@@ -1,9 +1,8 @@
-"""Subagent definitions for Product Agent v7.0.
+"""Subagent definitions for Product Agent.
 
-Includes deployment-aware analyzer, pre-deployment validation in deployer,
-tester agent for automated test generation (v5.1), verifier agent for
-post-deployment testing (v5.0), spec auditor (v6.0), prompt enricher (v6.0),
-and Swift/SwiftUI plugin architecture support (v7.0).
+Defines prompts, tools, and models for all 10 pipeline agents.
+Stack-specific build details are loaded from per-stack templates
+in agent/stacks/templates/{stack_id}/.
 """
 
 from pathlib import Path
@@ -234,6 +233,21 @@ Describe the authentication flow:
 | POST | /api/items | Create item |
 | ... | ... | ... |
 
+### 6. Error & Loading States (per page)
+For each page, specify:
+- **Loading**: What skeleton/spinner to show while data loads
+- **Error**: What to display if data fetch fails
+- **Empty**: What to display when there's no data yet
+
+The root layout MUST include an error boundary (`error.tsx`).
+Each route group should have a `loading.tsx`.
+
+### 7. Form Validation
+For each form, specify:
+- Required fields with validation rules
+- Error message format
+- Submit button loading state
+
 ## Principles
 - Mobile-first responsive design
 - Minimal viable features only
@@ -345,7 +359,9 @@ Review DESIGN.md and validate it's ready for implementation.
 - [ ] All pages have defined auth requirements
 - [ ] No orphan pages (unreachable from navigation)
 - [ ] Core user flows are complete
-- [ ] Error and loading states considered
+- [ ] Error states defined for each data-fetching page
+- [ ] Loading/skeleton states defined for async content
+- [ ] Empty states defined for list/table pages
 
 ### Components
 - [ ] Component hierarchy is clear
@@ -425,11 +441,11 @@ BUILDER_PROMPT = """You are a Full-Stack Developer who implements applications b
 1. Read STACK_DECISION.md to understand the stack
 2. Read DESIGN.md to understand the architecture
 3. Read ORIGINAL_PROMPT.md to cross-reference specific values
-4. Implement the complete application
+4. Implement the complete application following the Build Process Reference
 5. Set up test infrastructure (the tester agent will generate actual tests)
 6. Verify the build passes
 
-## CRITICAL: Cross-Reference Original Prompt (v6.0)
+## Cross-Reference Original Prompt
 
 When implementing, ALWAYS cross-reference ORIGINAL_PROMPT.md for:
 - Specific prices, costs, amounts
@@ -441,222 +457,6 @@ When implementing, ALWAYS cross-reference ORIGINAL_PROMPT.md for:
 If DESIGN.md conflicts with ORIGINAL_PROMPT.md on specific data values,
 ORIGINAL_PROMPT.md is authoritative for factual data.
 DESIGN.md is authoritative for architecture and structure.
-
-## Process by Stack
-
-### For Next.js + Supabase
-1. Scaffold: `npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"`
-2. Install: `npm install @supabase/supabase-js @supabase/ssr`
-3. Add shadcn: `npx shadcn@latest init -y && npx shadcn@latest add button input card form label`
-4. **Setup Tests**: `npm install -D vitest @testing-library/react @testing-library/jest-dom happy-dom @vitejs/plugin-react`
-5. Create vitest.config.ts and src/test/setup.ts
-6. Create Supabase clients (lib/supabase/client.ts, server.ts)
-7. Create middleware.ts for auth
-8. Create .env.local.example
-9. Implement pages from DESIGN.md
-10. Implement components
-11. Run `npm run build`
-
-### For Next.js + Prisma
-1. Scaffold: `npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"`
-2. Install: `npm install prisma @prisma/client next-auth@latest @auth/prisma-adapter`
-3. **Validate peer dependencies**: Run `npm ls --all 2>&1 | grep "peer dep"` — if any conflicts, fix versions before continuing
-4. Run: `npx prisma init`
-5. **Setup Tests**: `npm install -D vitest @testing-library/react @testing-library/jest-dom happy-dom @vitejs/plugin-react`
-6. Create vitest.config.ts and src/test/setup.ts
-7. Create Prisma schema from DESIGN.md
-8. Set up Auth.js configuration using the `useActionState` + server action pattern (see Code Patterns Reference)
-9. Implement pages and components — use native `<select>` for form dropdowns, NOT Radix Select
-10. Run `npm run build`
-
-### For Rails
-1. Scaffold: `rails new . --database=postgresql --css=tailwind`
-2. Add gems: devise, activeadmin, sidekiq
-3. **Setup Tests**: Add to Gemfile test group: minitest-reporters, factory_bot_rails, faker
-4. Generate models from DESIGN.md
-5. Create controllers and views
-6. Set up routes
-7. Run `rails test` to verify setup
-
-### For Expo
-1. Scaffold: `npx create-expo-app . --template tabs`
-2. Install Supabase and navigation dependencies
-3. **Setup Tests**: `npm install -D jest @testing-library/react-native @testing-library/jest-native jest-expo`
-4. Create jest.config.js and jest.setup.js
-5. **CRITICAL**: Create `babel.config.js` with `import.meta.env` → `process.env` transform (see scaffold template). Without this, the web bundle will silently fail — pages render but no click handlers work.
-6. Create `metro.config.js` using `expo/metro-config` defaults
-7. If targeting web: Add `"web": { "bundler": "metro", "output": "static" }` to app.json
-8. Set up auth context
-9. Implement screens from DESIGN.md
-10. Run `npx expo start` to verify compilation
-11. If targeting web: Run `npx expo export --platform web` and scan the output bundle for `import.meta` to verify the babel transform is working
-
-### For Swift + SwiftUI (v7.0)
-
-#### Plugin Mode (--mode plugin)
-1. **FIRST: Create NCBSPluginSDK as a local package** using the EXACT definitions in the "NCBSPluginSDK Definition" section below. Do NOT simplify or create your own version.
-2. Verify it compiles: `cd NCBSPluginSDK && swift build && cd ..`
-3. Scaffold plugin: `swift package init --type library --name [PluginName]Plugin`
-4. Update Package.swift: add `.package(path: "./NCBSPluginSDK")` dependency and `platforms: [.iOS(.v17), .macOS(.v14)]`
-5. Run `swift build` to verify dependency resolves
-6. Implement `[PluginName]Plugin.swift` conforming to `NCBSPlugin` protocol with `init(context: PluginContext)` (NOT `init()`)
-7. Implement `PluginManifest.swift` — see the "Plugin PluginManifest Pattern" section below
-8. Create `Sources/[PluginName]Plugin/Color+NoCloudBS.swift` with the host color constants:
-   black (#000000), blackGold (#1A1400), gold (#CFB53B), goldLight (#E8D48B),
-   teal (#008080), tealLight (#40E0D0). Use these in ALL views — no custom colors.
-9. Implement views, models, and view models per DESIGN.md
-   **CRITICAL**: All ViewModels MUST use the `@Observable` macro, NOT `ObservableObject`/`@Published`.
-   Views use `@State` for owned ViewModels and plain property references — no `@ObservedObject` or `@StateObject`.
-10. Create `MockPluginContext.swift` for tests (must conform to `PluginContext` protocol)
-11. Run `swift build` to verify final compilation
-
-#### Host Mode (--mode host)
-1. **FIRST: Create NCBSPluginSDK as a local package** — this MUST exist before the host app can build
-2. `mkdir -p NCBSPluginSDK && cd NCBSPluginSDK && swift package init --type library`
-3. Implement ALL protocol definitions in SDK: NCBSPlugin, PluginContext, CompressionServiceProtocol, StorageServiceProtocol, NetworkServiceProtocol, PluginPermission
-4. Run `swift build` in NCBSPluginSDK to verify SDK compiles
-5. Create main app package with local path dependency: `.package(path: "../NCBSPluginSDK")`
-6. Create app structure: `Sources/{Core,Services,Views,Models}`
-7. Implement `PluginRegistry.swift`, `PluginContextImpl.swift`
-8. Implement service concretions: CompressionService, StorageService, NetworkService
-9. Create SwiftUI App entry point with TabView and plugin registration
-10. Implement DashboardView (storage stats) and SettingsView
-11. Run `swift build` to verify compilation
-
-#### NCBSPluginSDK Definition (MANDATORY — create this FIRST, before the plugin)
-
-**Do NOT simplify, rename, or redesign these protocols.** Copy them exactly.
-**Do NOT define `PluginManifest` inside the SDK** — that name is reserved for the plugin-side discovery file.
-
-Create `NCBSPluginSDK/Package.swift`:
-```swift
-// swift-tools-version: 5.9
-import PackageDescription
-let package = Package(
-    name: "NCBSPluginSDK",
-    platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [.library(name: "NCBSPluginSDK", targets: ["NCBSPluginSDK"])],
-    targets: [.target(name: "NCBSPluginSDK")]
-)
-```
-
-Create `NCBSPluginSDK/Sources/NCBSPluginSDK/NCBSPlugin.swift`:
-```swift
-import SwiftUI
-public protocol NCBSPlugin {
-    static var id: String { get }
-    static var name: String { get }
-    static var description: String { get }
-    static var icon: String { get }
-    static var version: String { get }
-    init(context: PluginContext)
-    @MainActor @ViewBuilder var mainView: any View { get }
-    @MainActor @ViewBuilder var settingsView: (any View)? { get }
-    func onActivate() async
-    func onDeactivate() async
-}
-public extension NCBSPlugin {
-    var settingsView: (any View)? { nil }
-    func onActivate() async {}
-    func onDeactivate() async {}
-}
-```
-
-Create `NCBSPluginSDK/Sources/NCBSPluginSDK/PluginContext.swift`:
-```swift
-import Foundation
-public protocol PluginContext: Sendable {
-    var compressionService: CompressionServiceProtocol { get }
-    var storageService: StorageServiceProtocol { get }
-    var networkService: NetworkServiceProtocol { get }
-    var userDefaults: UserDefaults { get }
-    func requestPermission(_ permission: PluginPermission) async -> Bool
-}
-```
-
-Create `NCBSPluginSDK/Sources/NCBSPluginSDK/Services.swift`:
-```swift
-import Foundation
-public protocol CompressionServiceProtocol: Sendable {
-    func compress(data: Data) async throws -> Data
-    func decompress(data: Data) async throws -> Data
-    var compressionRatio: Double { get }
-}
-public protocol StorageServiceProtocol: Sendable {
-    func save(_ data: Data, key: String) async throws
-    func load(key: String) async throws -> Data?
-    func delete(key: String) async throws
-    func listKeys(prefix: String?) async -> [String]
-    var availableSpace: Int64 { get }
-    var usedSpace: Int64 { get }
-}
-public protocol NetworkServiceProtocol: Sendable {
-    func request(_ endpoint: String, method: String, body: Data?) async throws -> Data
-}
-```
-
-Create `NCBSPluginSDK/Sources/NCBSPluginSDK/PluginPermission.swift`:
-```swift
-public enum PluginPermission: String, Sendable, CaseIterable {
-    case camera, photoLibrary, notifications, fileAccess, network, storage
-}
-```
-
-After creating ALL files above, run `cd NCBSPluginSDK && swift build && cd ..` to verify.
-
-#### Plugin PluginManifest Pattern (REQUIRED — in the PLUGIN, not in the SDK)
-The plugin (not the SDK) must include `PluginManifest.swift` for host discovery:
-```swift
-import NCBSPluginSDK
-public struct PluginManifest {
-    public static let pluginType: any NCBSPlugin.Type = MyPlugin.self
-}
-```
-Replace `MyPlugin` with the actual plugin struct name.
-Do NOT use `typealias PluginEntry`. Do NOT put `PluginManifest` in the SDK package.
-
-## Test Infrastructure Setup (Required)
-
-You MUST set up the test infrastructure during build. The tester agent will generate the actual tests.
-
-### For Next.js (vitest)
-Create vitest.config.ts:
-```typescript
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import path from 'path'
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'happy-dom',
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
-    globals: true,
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-})
-```
-
-Create src/test/setup.ts:
-```typescript
-import '@testing-library/jest-dom'
-```
-
-Add to package.json scripts:
-```json
-{
-  "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
-  }
-}
-```
 
 ## Error Handling
 
@@ -1701,7 +1501,12 @@ Compare specific values between ORIGINAL_PROMPT.md and the source code:
 - Navigation links match the defined pages
 - Footer content matches requirements
 
-### 4. Branding/Colors
+### 4. Error Handling & Loading States
+- Verify `error.tsx` exists in `src/app/` (global error boundary)
+- Verify `loading.tsx` exists in route groups with async data
+- Check that list/table components handle empty arrays gracefully
+
+### 5. Branding/Colors
 - Color palette matches what was specified
 - Tailwind config includes the defined colors
 
@@ -1910,7 +1715,11 @@ def get_agent_prompt(
 
     # Inject stack templates for builder
     if agent_name == "builder" and stack_id:
-        # v7.0: Use scaffold-plugin template for plugin mode
+        # Build process (per-stack steps, test infra, SDK definitions)
+        builder_ref = _load_template(stack_id, "builder")
+        if builder_ref:
+            prompt += f"\n\n## Build Process Reference\n{builder_ref}"
+        # Scaffolding reference (directory structure, boilerplate)
         if stack_id == "swift-swiftui" and build_mode == "plugin":
             scaffold = _load_template(stack_id, "scaffold-plugin")
         else:
@@ -1920,7 +1729,7 @@ def get_agent_prompt(
             prompt += f"\n\n## Scaffolding Reference\n{scaffold}"
         if patterns:
             prompt += f"\n\n## Code Patterns Reference\n{patterns}"
-        # v7.0: Inject plugin protocol reference for Swift builds
+        # Plugin protocol reference for Swift builds
         if stack_id == "swift-swiftui":
             protocol_ref = _load_template(stack_id, "plugin-protocol")
             if protocol_ref:

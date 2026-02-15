@@ -156,35 +156,58 @@ class TestDesignerPrompt:
         assert "Storage Key Convention" in self.prompt
         assert "namespaced" in self.prompt
 
+    def test_mentions_error_loading_states_section(self):
+        assert "Error & Loading States" in self.prompt
+
+    def test_mentions_form_validation_section(self):
+        assert "Form Validation" in self.prompt
+
 
 # ---------------------------------------------------------------------------
 # TestBuilderPrompt
 # ---------------------------------------------------------------------------
 
 class TestBuilderPrompt:
-    """Verify the builder prompt covers SDK creation, cross-referencing, and test setup."""
+    """Verify the builder prompt covers core principles and stack templates inject correctly."""
 
     @pytest.fixture(autouse=True)
     def _load_prompt(self):
         self.prompt = get_agents()["builder"]["prompt"]
 
-    def test_mentions_ncbs_plugin_sdk(self):
-        assert "NCBSPluginSDK" in self.prompt
-
     def test_mentions_original_prompt_cross_reference(self):
         assert "ORIGINAL_PROMPT.md" in self.prompt
 
-    def test_mentions_test_infrastructure_setup(self):
-        assert "Test Infrastructure Setup" in self.prompt
+    def test_mentions_error_handling(self):
+        assert "Error Handling" in self.prompt
 
-    def test_mentions_color_no_cloud_bs(self):
-        assert "Color+NoCloudBS" in self.prompt
+    def test_core_prompt_is_concise(self):
+        # After extracting per-stack content, core should be under 200 lines
+        line_count = self.prompt.count("\n")
+        assert line_count < 200, f"Core builder prompt is {line_count} lines, expected < 200"
 
-    def test_mentions_plugin_manifest_pattern(self):
-        assert "PluginManifest" in self.prompt
+    def test_swift_builder_template_injects_sdk(self):
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "NCBSPluginSDK" in prompt
 
-    def test_mentions_observable(self):
-        assert "@Observable" in self.prompt
+    def test_swift_builder_template_injects_observable(self):
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "@Observable" in prompt
+
+    def test_swift_builder_template_injects_color_constants(self):
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "Color+NoCloudBS" in prompt
+
+    def test_swift_builder_template_injects_plugin_manifest(self):
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "PluginManifest" in prompt
+
+    def test_nextjs_builder_template_injects_test_infra(self):
+        prompt = get_agent_prompt("builder", stack_id="nextjs-supabase")
+        assert "vitest.config.ts" in prompt
+
+    def test_builder_template_injects_build_process(self):
+        prompt = get_agent_prompt("builder", stack_id="nextjs-prisma")
+        assert "Build Process Reference" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +291,33 @@ class TestAuditorPrompt:
     def test_mentions_read_only_constraint(self):
         assert "read-only" in self.prompt.lower()
 
+    def test_mentions_error_boundary_verification(self):
+        assert "error.tsx" in self.prompt
+
+    def test_mentions_loading_verification(self):
+        assert "loading.tsx" in self.prompt
+
+
+# ---------------------------------------------------------------------------
+# TestReviewerPrompt
+# ---------------------------------------------------------------------------
+
+class TestReviewerPrompt:
+    """Verify the reviewer prompt covers design validation with error/loading states."""
+
+    @pytest.fixture(autouse=True)
+    def _load_prompt(self):
+        self.prompt = get_agents()["reviewer"]["prompt"]
+
+    def test_mentions_error_states_checklist(self):
+        assert "Error states" in self.prompt
+
+    def test_mentions_loading_states_checklist(self):
+        assert "Loading" in self.prompt or "loading" in self.prompt
+
+    def test_mentions_empty_states_checklist(self):
+        assert "Empty states" in self.prompt
+
 
 # ---------------------------------------------------------------------------
 # TestEnricherPrompt
@@ -337,6 +387,18 @@ class TestGetAgentPromptTemplateInjection:
     def test_designer_with_product_type_gets_domain_patterns_injected(self):
         prompt = get_agent_prompt("designer", product_type="saas")
         assert "Domain Patterns" in prompt
+
+    def test_builder_with_nextjs_supabase_gets_builder_template_injected(self):
+        prompt = get_agent_prompt("builder", stack_id="nextjs-supabase")
+        assert "Build Process Reference" in prompt
+
+    def test_builder_with_rails_gets_builder_template_injected(self):
+        prompt = get_agent_prompt("builder", stack_id="rails")
+        assert "Build Process Reference" in prompt
+
+    def test_builder_with_expo_gets_builder_template_injected(self):
+        prompt = get_agent_prompt("builder", stack_id="expo-supabase")
+        assert "Build Process Reference" in prompt
 
     def test_unknown_agent_raises_value_error(self):
         with pytest.raises(ValueError, match="Unknown agent"):

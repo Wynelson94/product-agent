@@ -106,6 +106,8 @@ class AgentState:
     build_mode: str = "standard"  # "standard" | "host" | "plugin"
     plugin_packaged: bool = False  # True when plugin swift build + swift test pass
 
+    MAX_PHASE_HISTORY = 50
+
     def transition_to(self, new_phase: Phase, notes: str = "") -> None:
         """Transition to a new phase, recording the change."""
         self.phase_history.append({
@@ -114,6 +116,9 @@ class AgentState:
             "timestamp": datetime.now().isoformat(),
             "notes": notes,
         })
+        # Cap phase history to prevent unbounded growth
+        if len(self.phase_history) > self.MAX_PHASE_HISTORY:
+            self.phase_history = self.phase_history[-self.MAX_PHASE_HISTORY:]
         self.phase = new_phase
 
     def record_error(self, error: str) -> None:

@@ -1,11 +1,11 @@
-"""Build memory for Product Agent v8.0.
+"""Build memory for Product Agent.
 
 Tracks every build's decisions and outcomes in an append-only log.
-Queries similar past builds to inject context into new builds.
+Queries similar past builds to inject context and failure lessons into new builds.
 """
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -31,6 +31,8 @@ class BuildRecord:
     test_count: str | None = None
     spec_coverage: str | None = None
     timestamp: str | None = None
+    failure_reasons: list[str] = field(default_factory=list)
+    lessons: list[str] = field(default_factory=list)
 
 
 class BuildHistory:
@@ -98,6 +100,64 @@ class BuildHistory:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [record for _, record in scored[:limit]]
 
+    def get_relevant_lessons(
+        self,
+        idea: str,
+        stack: str | None = None,
+        limit: int = 5,
+    ) -> list[str]:
+        """Find lessons from similar past builds.
+
+        Searches failure_reasons and lessons from builds that match by
+        idea similarity or stack. Returns deduplicated lessons.
+
+        Args:
+            idea: The current product idea
+            stack: Optional stack ID to filter by
+            limit: Maximum number of lessons to return
+
+        Returns:
+            List of lesson strings relevant to this build
+        """
+        all_builds = self.get_all_builds()
+        if not all_builds:
+            return []
+
+        idea_words = set(idea.lower().split())
+        lessons: list[tuple[float, str]] = []
+
+        for record in all_builds:
+            if not record.lessons and not record.failure_reasons:
+                continue
+
+            # Score by idea similarity + stack match
+            record_words = set(record.idea.lower().split())
+            intersection = idea_words & record_words
+            union = idea_words | record_words
+            score = len(intersection) / len(union) if union else 0
+
+            # Boost score for same stack
+            if stack and record.stack == stack:
+                score += 0.3
+
+            if score < 0.1:
+                continue
+
+            for lesson in record.lessons:
+                lessons.append((score, lesson))
+            for reason in record.failure_reasons:
+                lessons.append((score, f"Previous failure: {reason}"))
+
+        # Deduplicate and sort by relevance
+        seen: set[str] = set()
+        unique: list[tuple[float, str]] = []
+        for score, lesson in sorted(lessons, key=lambda x: x[0], reverse=True):
+            if lesson not in seen:
+                seen.add(lesson)
+                unique.append((score, lesson))
+
+        return [lesson for _, lesson in unique[:limit]]
+
     def format_similar_builds(self, builds: list[BuildRecord]) -> str:
         """Format similar builds as context for injection."""
         if not builds:
@@ -113,7 +173,33 @@ class BuildHistory:
             if build.test_count:
                 parts.append(f"- Tests: {build.test_count}")
             parts.append(f"- Duration: {build.total_duration_s:.0f}s")
+            if build.lessons:
+                parts.append("- Lessons learned:")
+                for lesson in build.lessons[:3]:
+                    parts.append(f"  - {lesson}")
+            if build.failure_reasons:
+                parts.append("- Failure reasons:")
+                for reason in build.failure_reasons[:3]:
+                    parts.append(f"  - {reason}")
 
+        return "\n".join(parts)
+
+    def format_lessons(self, lessons: list[str]) -> str:
+        """Format lessons for injection into builder prompts.
+
+        Args:
+            lessons: List of lesson strings
+
+        Returns:
+            Formatted markdown section, or empty string if no lessons
+        """
+        if not lessons:
+            return ""
+
+        parts = ["## Lessons from Past Builds"]
+        parts.append("Avoid these known issues:")
+        for lesson in lessons:
+            parts.append(f"- {lesson}")
         return "\n".join(parts)
 
     def get_success_rate(self) -> tuple[int, int]:

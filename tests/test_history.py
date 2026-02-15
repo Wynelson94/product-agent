@@ -109,8 +109,26 @@ class TestBuildRecord:
             "id", "idea", "stack", "mode", "domain", "phases",
             "total_duration_s", "outcome", "url", "quality",
             "test_count", "spec_coverage", "timestamp",
+            "failure_reasons", "lessons",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_default_failure_reasons_and_lessons(self):
+        """failure_reasons and lessons default to empty lists."""
+        rec = _minimal_record()
+        assert rec.failure_reasons == []
+        assert rec.lessons == []
+
+    def test_failure_reasons_and_lessons_roundtrip(self):
+        """failure_reasons and lessons survive JSON roundtrip."""
+        rec = _minimal_record(
+            failure_reasons=["peer dep conflict", "missing middleware"],
+            lessons=["Always validate peer deps before build"],
+        )
+        json_str = json.dumps(asdict(rec))
+        restored = BuildRecord(**json.loads(json_str))
+        assert restored.failure_reasons == ["peer dep conflict", "missing middleware"]
+        assert restored.lessons == ["Always validate peer deps before build"]
 
     def test_empty_string_idea(self):
         """BuildRecord allows an empty idea string."""
@@ -655,6 +673,147 @@ class TestBuildHistory:
         assert len(builds) == 2
         assert builds[0].id == "seed"
         assert builds[1].id == "new"
+
+    # -----------------------------------------------------------------------
+    # get_relevant_lessons
+    # -----------------------------------------------------------------------
+
+    def test_get_relevant_lessons_empty_history(self, tmp_path):
+        """get_relevant_lessons returns [] when there are no builds."""
+        history = BuildHistory(project_root=tmp_path)
+        assert history.get_relevant_lessons("build a todo app") == []
+
+    def test_get_relevant_lessons_from_similar_build(self, tmp_path):
+        """get_relevant_lessons finds lessons from similar past builds."""
+        history = BuildHistory(project_root=tmp_path)
+        history.record_build(_minimal_record(
+            id="past",
+            idea="build a task management app",
+            stack="nextjs-prisma",
+            outcome="failed",
+            failure_reasons=["peer dep conflict with next-auth"],
+            lessons=["Always run npm ls after installing next-auth"],
+        ))
+        lessons = history.get_relevant_lessons("build a task manager app")
+        assert len(lessons) > 0
+        assert any("next-auth" in l for l in lessons)
+
+    def test_get_relevant_lessons_stack_boost(self, tmp_path):
+        """get_relevant_lessons boosts score for same stack."""
+        history = BuildHistory(project_root=tmp_path)
+        # Low word overlap but same stack
+        history.record_build(_minimal_record(
+            id="same_stack",
+            idea="create xyz dashboard",
+            stack="nextjs-prisma",
+            lessons=["Use useActionState for forms"],
+        ))
+        # Higher word overlap but different stack
+        history.record_build(_minimal_record(
+            id="diff_stack",
+            idea="build a dashboard app",
+            stack="rails",
+            lessons=["Rails lesson"],
+        ))
+        lessons = history.get_relevant_lessons("build a dashboard", stack="nextjs-prisma")
+        # Should include lessons from both but stack-matched one gets boosted
+        assert len(lessons) > 0
+
+    def test_get_relevant_lessons_deduplicates(self, tmp_path):
+        """get_relevant_lessons returns unique lessons."""
+        history = BuildHistory(project_root=tmp_path)
+        history.record_build(_minimal_record(
+            id="b1",
+            idea="build a todo app",
+            lessons=["Always validate forms"],
+        ))
+        history.record_build(_minimal_record(
+            id="b2",
+            idea="build a todo list",
+            lessons=["Always validate forms"],
+        ))
+        lessons = history.get_relevant_lessons("build a todo app")
+        assert lessons.count("Always validate forms") == 1
+
+    def test_get_relevant_lessons_respects_limit(self, tmp_path):
+        """get_relevant_lessons returns at most limit lessons."""
+        history = BuildHistory(project_root=tmp_path)
+        history.record_build(_minimal_record(
+            id="past",
+            idea="build a todo app",
+            lessons=[f"lesson {i}" for i in range(10)],
+        ))
+        lessons = history.get_relevant_lessons("build a todo app", limit=3)
+        assert len(lessons) <= 3
+
+    def test_get_relevant_lessons_includes_failure_reasons(self, tmp_path):
+        """get_relevant_lessons includes failure_reasons prefixed with 'Previous failure:'."""
+        history = BuildHistory(project_root=tmp_path)
+        history.record_build(_minimal_record(
+            id="past",
+            idea="build a todo app",
+            failure_reasons=["database not configured"],
+        ))
+        lessons = history.get_relevant_lessons("build a todo app")
+        assert any("Previous failure:" in l for l in lessons)
+        assert any("database not configured" in l for l in lessons)
+
+    def test_get_relevant_lessons_ignores_unrelated_builds(self, tmp_path):
+        """get_relevant_lessons ignores builds with very low similarity."""
+        history = BuildHistory(project_root=tmp_path)
+        history.record_build(_minimal_record(
+            id="unrelated",
+            idea="alpha bravo charlie delta echo foxtrot",
+            lessons=["Unrelated lesson"],
+        ))
+        lessons = history.get_relevant_lessons("kilo lima mike november")
+        assert lessons == []
+
+    # -----------------------------------------------------------------------
+    # format_lessons
+    # -----------------------------------------------------------------------
+
+    def test_format_lessons_empty(self, tmp_path):
+        """format_lessons returns empty string for no lessons."""
+        history = BuildHistory(project_root=tmp_path)
+        assert history.format_lessons([]) == ""
+
+    def test_format_lessons_contains_header(self, tmp_path):
+        """format_lessons output starts with section header."""
+        history = BuildHistory(project_root=tmp_path)
+        result = history.format_lessons(["Use useActionState"])
+        assert "## Lessons from Past Builds" in result
+
+    def test_format_lessons_contains_items(self, tmp_path):
+        """format_lessons includes each lesson as a bullet point."""
+        history = BuildHistory(project_root=tmp_path)
+        result = history.format_lessons(["Lesson A", "Lesson B"])
+        assert "- Lesson A" in result
+        assert "- Lesson B" in result
+
+    # -----------------------------------------------------------------------
+    # format_similar_builds with lessons/failures
+    # -----------------------------------------------------------------------
+
+    def test_format_similar_builds_includes_lessons(self, tmp_path):
+        """format_similar_builds shows lessons when present."""
+        history = BuildHistory(project_root=tmp_path)
+        builds = [_minimal_record(lessons=["Check peer deps"])]
+        result = history.format_similar_builds(builds)
+        assert "Lessons learned:" in result
+        assert "Check peer deps" in result
+
+    def test_format_similar_builds_includes_failure_reasons(self, tmp_path):
+        """format_similar_builds shows failure reasons when present."""
+        history = BuildHistory(project_root=tmp_path)
+        builds = [_minimal_record(failure_reasons=["Missing middleware"])]
+        result = history.format_similar_builds(builds)
+        assert "Failure reasons:" in result
+        assert "Missing middleware" in result
+
+    # -----------------------------------------------------------------------
+    # Integration
+    # -----------------------------------------------------------------------
 
     def test_find_similar_then_format_integration(self, tmp_path):
         """find_similar_builds + format_similar_builds work end-to-end."""

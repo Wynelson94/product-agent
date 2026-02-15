@@ -10,6 +10,8 @@ from agent.hooks.safety import (
     is_command_safe,
     safety_hook,
     auto_approve_hook,
+    _split_command_segments,
+    _naive_split,
     BLOCKED_BASH_PATTERNS,
     PROTECTED_PATH_PREFIXES,
     PROTECTED_PATH_PATTERNS,
@@ -504,6 +506,128 @@ class TestAutoApproveHook:
         input_data["hook_event_name"] = "PostToolUse"
         result = await auto_approve_hook(input_data, None, None)
         assert result == {}
+
+
+class TestCommandSegmentSplitting:
+    """Tests for shell-aware command splitting that respects quoted strings."""
+
+    # --- Quoted strings should NOT be split ---
+
+    def test_double_quoted_semicolon_not_split(self):
+        """Semicolons inside double quotes should not cause splitting."""
+        segments = _split_command_segments('echo "hello; world"')
+        assert len(segments) == 1
+        assert 'echo "hello; world"' in segments[0]
+
+    def test_single_quoted_semicolon_not_split(self):
+        """Semicolons inside single quotes should not cause splitting."""
+        segments = _split_command_segments("echo 'hello; world'")
+        assert len(segments) == 1
+        assert "echo 'hello; world'" in segments[0]
+
+    def test_double_quoted_and_and_not_split(self):
+        """&& inside double quotes should not cause splitting."""
+        segments = _split_command_segments('echo "foo && bar"')
+        assert len(segments) == 1
+
+    def test_single_quoted_pipe_pipe_not_split(self):
+        """|| inside single quotes should not cause splitting."""
+        segments = _split_command_segments("echo 'foo || bar'")
+        assert len(segments) == 1
+
+    def test_dangerous_command_in_quotes_not_split(self):
+        """A dangerous command inside quotes should stay as one segment."""
+        segments = _split_command_segments('echo "safe ; rm -rf /"')
+        assert len(segments) == 1
+
+    # --- Unquoted separators SHOULD be split ---
+
+    def test_splits_on_unquoted_semicolon(self):
+        segments = _split_command_segments("ls; pwd")
+        assert len(segments) == 2
+        assert segments[0].strip() == "ls"
+        assert segments[1].strip() == "pwd"
+
+    def test_splits_on_unquoted_and_and(self):
+        segments = _split_command_segments("ls && pwd")
+        assert len(segments) == 2
+
+    def test_splits_on_unquoted_pipe_pipe(self):
+        segments = _split_command_segments("ls || echo 'fail'")
+        assert len(segments) == 2
+
+    # --- Mixed quoted and unquoted ---
+
+    def test_mixed_quoted_and_unquoted_separators(self):
+        """Quoted separator preserved, unquoted one splits."""
+        segments = _split_command_segments('echo "a; b" && pwd')
+        assert len(segments) == 2
+        assert '"a; b"' in segments[0]
+        assert segments[1].strip() == "pwd"
+
+    def test_multiple_quoted_strings_with_separators(self):
+        segments = _split_command_segments('echo "a; b" && echo "c && d"')
+        assert len(segments) == 2
+        assert '"a; b"' in segments[0]
+        assert '"c && d"' in segments[1]
+
+    # --- Edge cases ---
+
+    def test_empty_command(self):
+        segments = _split_command_segments("")
+        assert segments == [""]
+
+    def test_no_separators(self):
+        segments = _split_command_segments("npm install")
+        assert len(segments) == 1
+        assert segments[0] == "npm install"
+
+    def test_escaped_quote_in_double_quotes(self):
+        """Escaped quotes inside double quotes should be handled."""
+        segments = _split_command_segments(r'echo "hello \"world\"; test" && pwd')
+        assert len(segments) == 2
+
+    def test_unbalanced_quotes_falls_back_to_naive(self):
+        """Unbalanced quotes should trigger naive fallback split."""
+        segments = _split_command_segments('echo "unbalanced; rm -rf /')
+        # Naive split will split on ; since it can't parse quotes
+        assert len(segments) >= 2
+
+    # --- Integration: quoted attack strings should still be blocked ---
+
+    def test_quoted_rm_in_chained_command_blocked(self):
+        """Even with quoting, an unquoted dangerous segment should be caught."""
+        is_blocked, _ = is_command_blocked('echo "safe" && rm -rf /')
+        assert is_blocked
+
+    def test_quoted_safe_echo_not_blocked(self):
+        """An echo with a dangerous-looking string in quotes should not be blocked."""
+        is_blocked, _ = is_command_blocked('echo "rm -rf /"')
+        assert not is_blocked
+
+
+class TestNaiveSplit:
+    """Tests for the fallback naive splitting function."""
+
+    def test_splits_on_semicolons(self):
+        segments = _naive_split("ls; pwd")
+        assert len(segments) == 2
+
+    def test_splits_on_and_and(self):
+        segments = _naive_split("ls && pwd")
+        assert len(segments) == 2
+
+    def test_splits_on_pipe_pipe(self):
+        segments = _naive_split("ls || pwd")
+        assert len(segments) == 2
+
+    def test_no_separators(self):
+        segments = _naive_split("npm install")
+        assert len(segments) == 1
+
+    def test_multiple_separators(self):
+        segments = _naive_split("a; b && c || d")
+        assert len(segments) == 4
 
 
 class TestCoverageCompleteness:

@@ -482,3 +482,157 @@ class TestConvenienceFunctions:
         """resume_from_checkpoint() with a bad ID should return None."""
         result = resume_from_checkpoint(str(tmp_path), checkpoint_id="bogus_20260101_000000")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestCheckpointCleanup
+# ---------------------------------------------------------------------------
+
+class TestCheckpointCleanup:
+    """Tests for CheckpointManager.cleanup()."""
+
+    def test_cleanup_keeps_latest_n(self, tmp_path):
+        """cleanup(keep_latest=2) should delete all but the 2 most recent."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+
+        ids = []
+        for i, phase in enumerate([Phase.INIT, Phase.ANALYSIS, Phase.DESIGN, Phase.BUILD]):
+            state.phase = phase
+            cp_id = mgr.save(state, phase=phase)
+            ids.append(cp_id)
+            time.sleep(0.05)  # ensure distinct mtime
+
+        deleted = mgr.cleanup(keep_latest=2)
+        assert deleted == 2
+
+        # The 2 oldest should be gone
+        assert not (tmp_path / ".agent_checkpoints" / f"{ids[0]}.json").exists()
+        assert not (tmp_path / ".agent_checkpoints" / f"{ids[1]}.json").exists()
+        # The 2 newest should remain
+        assert (tmp_path / ".agent_checkpoints" / f"{ids[2]}.json").exists()
+        assert (tmp_path / ".agent_checkpoints" / f"{ids[3]}.json").exists()
+
+    def test_cleanup_noop_when_below_limit(self, tmp_path):
+        """cleanup() should return 0 when there are fewer checkpoints than the limit."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        mgr.save(state)
+
+        deleted = mgr.cleanup(keep_latest=5)
+        assert deleted == 0
+
+    def test_cleanup_preserves_latest_json(self, tmp_path):
+        """cleanup() should not delete latest.json."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        for phase in [Phase.INIT, Phase.ANALYSIS, Phase.DESIGN]:
+            state.phase = phase
+            mgr.save(state, phase=phase)
+            time.sleep(0.05)
+
+        mgr.cleanup(keep_latest=1)
+        assert (tmp_path / ".agent_checkpoints" / "latest.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# TestCheckpointArchive
+# ---------------------------------------------------------------------------
+
+class TestCheckpointArchive:
+    """Tests for CheckpointManager.archive()."""
+
+    def test_archive_creates_zip(self, tmp_path):
+        """archive() should create a .zip file containing checkpoints."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        mgr.save(state)
+
+        archive_path = mgr.archive()
+        assert archive_path is not None
+        assert archive_path.exists()
+        assert archive_path.suffix == ".zip"
+
+    def test_archive_includes_checkpoint_files(self, tmp_path):
+        """The archive should contain checkpoint JSON files."""
+        import zipfile
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        cp_id = mgr.save(state)
+
+        archive_path = mgr.archive()
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            names = zf.namelist()
+            assert any(cp_id in name for name in names)
+
+    def test_archive_includes_logs_if_present(self, tmp_path):
+        """If .agent_logs/ exists, archive should include those files."""
+        import zipfile
+
+        logs_dir = tmp_path / ".agent_logs"
+        logs_dir.mkdir()
+        (logs_dir / "test_log.md").write_text("log content")
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        mgr.save(state)
+
+        archive_path = mgr.archive()
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            names = zf.namelist()
+            assert any("agent_logs" in name for name in names)
+
+    def test_archive_returns_none_when_empty(self, tmp_path):
+        """archive() should return None when there's nothing to archive."""
+        # Create manager but don't save anything, and remove the empty dir
+        mgr = CheckpointManager(str(tmp_path))
+        # Clear the checkpoint dir
+        for f in mgr.checkpoint_dir.iterdir():
+            f.unlink()
+
+        result = mgr.archive()
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestPhaseHistoryCap
+# ---------------------------------------------------------------------------
+
+class TestPhaseHistoryCap:
+    """Tests for phase_history capping in AgentState.transition_to()."""
+
+    def test_phase_history_capped_at_max(self, tmp_path):
+        """transition_to() should cap phase_history at MAX_PHASE_HISTORY."""
+        state = _make_state(tmp_path)
+        max_hist = state.MAX_PHASE_HISTORY
+
+        # Add more than the limit
+        phases = [Phase.ANALYSIS, Phase.DESIGN, Phase.REVIEW, Phase.BUILD]
+        for i in range(max_hist + 20):
+            state.transition_to(phases[i % len(phases)], f"transition {i}")
+
+        assert len(state.phase_history) == max_hist
+
+    def test_phase_history_keeps_most_recent(self, tmp_path):
+        """When capped, the most recent entries should be preserved."""
+        state = _make_state(tmp_path)
+        max_hist = state.MAX_PHASE_HISTORY
+
+        for i in range(max_hist + 5):
+            state.transition_to(Phase.BUILD, f"entry-{i}")
+
+        # The last entry should be the most recent
+        assert state.phase_history[-1]["notes"] == f"entry-{max_hist + 4}"
+        # The first entry should be from after the cap kicked in
+        assert state.phase_history[0]["notes"] == "entry-5"
+
+    def test_phase_history_below_cap_unchanged(self, tmp_path):
+        """Below the cap, all entries should be preserved."""
+        state = _make_state(tmp_path)
+        state.transition_to(Phase.ANALYSIS, "first")
+        state.transition_to(Phase.DESIGN, "second")
+        state.transition_to(Phase.BUILD, "third")
+
+        assert len(state.phase_history) == 3
+        assert state.phase_history[0]["notes"] == "first"

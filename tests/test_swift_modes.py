@@ -353,48 +353,47 @@ class TestSwiftOrchestratorPrompts:
 # ---------------------------------------------------------------------------
 
 class TestSwiftAgentPrompts:
-    """Tests for Swift/SwiftUI content inside subagent prompts."""
+    """Tests for Swift/SwiftUI content in assembled builder prompt (core + templates)."""
 
     def test_builder_prompt_contains_ncbs_plugin_sdk(self):
-        """Builder prompt must include NCBSPluginSDK definition."""
-        agents = get_agents()
-        assert "NCBSPluginSDK" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must include NCBSPluginSDK definition."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "NCBSPluginSDK" in prompt
 
     def test_builder_prompt_contains_plugin_manifest(self):
-        """Builder prompt must describe PluginManifest pattern."""
-        agents = get_agents()
-        assert "PluginManifest" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must describe PluginManifest pattern."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "PluginManifest" in prompt
 
     def test_builder_prompt_contains_color_nocloudbs(self):
-        """Builder prompt must reference Color+NoCloudBS."""
-        agents = get_agents()
-        assert "Color+NoCloudBS" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must reference Color+NoCloudBS."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "Color+NoCloudBS" in prompt
 
     def test_builder_prompt_contains_observable(self):
-        """Builder prompt must require @Observable macro."""
-        agents = get_agents()
-        assert "@Observable" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must require @Observable macro."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "@Observable" in prompt
 
     def test_builder_prompt_contains_plugin_context_protocol(self):
-        """Builder prompt must define PluginContext as a protocol."""
-        agents = get_agents()
-        prompt = agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must define PluginContext as a protocol."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
         assert "protocol PluginContext" in prompt
 
     def test_builder_prompt_contains_compression_service_protocol(self):
-        """Builder prompt must define CompressionServiceProtocol."""
-        agents = get_agents()
-        assert "CompressionServiceProtocol" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must define CompressionServiceProtocol."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "CompressionServiceProtocol" in prompt
 
     def test_builder_prompt_contains_storage_service_protocol(self):
-        """Builder prompt must define StorageServiceProtocol."""
-        agents = get_agents()
-        assert "StorageServiceProtocol" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must define StorageServiceProtocol."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "StorageServiceProtocol" in prompt
 
     def test_builder_prompt_contains_plugin_permission(self):
-        """Builder prompt must define PluginPermission enum."""
-        agents = get_agents()
-        assert "PluginPermission" in agents["builder"]["prompt"]
+        """Assembled Swift builder prompt must define PluginPermission enum."""
+        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
+        assert "PluginPermission" in prompt
 
     def test_auditor_prompt_contains_swift_audit_section(self):
         """Auditor prompt must include Swift/SwiftUI audit section."""
