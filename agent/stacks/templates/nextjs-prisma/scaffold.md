@@ -12,8 +12,8 @@ cd src
 npm install prisma@5.22.0 @prisma/client@5.22.0
 npx prisma init
 
-# Install Auth.js (NextAuth)
-npm install next-auth @auth/prisma-adapter
+# Install Auth.js (NextAuth) — see Dependency Compatibility below
+npm install next-auth@latest @auth/prisma-adapter
 
 # Install shadcn/ui
 npx shadcn@latest init -y
@@ -23,6 +23,24 @@ npx shadcn@latest add button input card form label toast dialog dropdown-menu av
 npm install zod@3.23.8 react-hook-form @hookform/resolvers lucide-react bcryptjs
 npm install -D @types/bcryptjs
 ```
+
+## Dependency Compatibility (CRITICAL)
+
+After installing dependencies, check for peer dependency conflicts:
+```bash
+npm ls --all 2>&1 | grep "peer dep" || echo "No peer dependency conflicts"
+```
+
+If conflicts are found, fix them before proceeding. Common version requirements:
+
+| Next.js Version | next-auth Version | Notes |
+|-----------------|-------------------|-------|
+| next@16.x | next-auth@5.0.0-beta.30+ | Beta.25 does NOT support Next.js 16 |
+| next@15.x | next-auth@5.0.0-beta.25+ | |
+| next@14.x | next-auth@5.0.0-beta.20+ | |
+
+**IMPORTANT**: `npx create-next-app@latest` installs the latest Next.js (currently 16.x).
+Ensure the next-auth version is compatible with the installed Next.js version.
 
 ## Directory Structure
 

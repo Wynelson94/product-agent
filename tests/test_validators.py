@@ -757,7 +757,7 @@ class TestValidateVerify:
 
     def test_verification_md_missing(self, tmp_path):
         result = _validate_verify(tmp_path)
-        assert result.passed is True
+        assert result.passed is False
         assert any("not found" in m for m in result.messages)
 
     def test_verification_passed(self, tmp_path):

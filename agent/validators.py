@@ -224,7 +224,7 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
     content = audit_file.read_text()
     content_lower = content.lower()
 
-    # Extract requirement counts
+    # Extract requirement counts — primary format: "X/Y requirements met"
     match = re.search(r'(\d+)\s*/\s*(\d+)', content)
     if match:
         met, total = int(match.group(1)), int(match.group(2))
@@ -232,7 +232,17 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
         result.extracted["requirements_total"] = total
         result.add_info(f"Spec coverage: {met}/{total}")
 
-    if "pass" in content_lower:
+    # Fallback: "Discrepancies Found: N" (common audit output format)
+    disc_match = re.search(r'discrepancies\s*found:\s*(\d+)', content_lower)
+    if disc_match:
+        result.extracted["discrepancies"] = int(disc_match.group(1))
+        result.add_info(f"Discrepancies found: {disc_match.group(1)}")
+
+    # Determine pass/fail status
+    if "needs_fix" in content_lower or "status: needs_fix" in content_lower:
+        result.extracted["passed"] = False
+        result.add_info("Audit status: NEEDS_FIX")
+    elif "pass" in content_lower:
         result.extracted["passed"] = True
     elif "fail" in content_lower:
         result.extracted["passed"] = False
@@ -339,7 +349,7 @@ def _validate_verify(project_dir: Path) -> ValidationResult:
     verify_file = project_dir / "VERIFICATION.md"
 
     if not verify_file.exists():
-        result.add_info("VERIFICATION.md not found — verification may have been skipped")
+        result.add_error("VERIFICATION.md not found — verifier must produce this artifact")
         return result
 
     content = verify_file.read_text()

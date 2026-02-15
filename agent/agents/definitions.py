@@ -450,14 +450,15 @@ DESIGN.md is authoritative for architecture and structure.
 
 ### For Next.js + Prisma
 1. Scaffold: `npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"`
-2. Install: `npm install prisma @prisma/client next-auth @auth/prisma-adapter`
-3. Run: `npx prisma init`
-4. **Setup Tests**: `npm install -D vitest @testing-library/react @testing-library/jest-dom happy-dom @vitejs/plugin-react`
-5. Create vitest.config.ts and src/test/setup.ts
-6. Create Prisma schema from DESIGN.md
-7. Set up Auth.js configuration
-8. Implement pages and components
-9. Run `npm run build`
+2. Install: `npm install prisma @prisma/client next-auth@latest @auth/prisma-adapter`
+3. **Validate peer dependencies**: Run `npm ls --all 2>&1 | grep "peer dep"` — if any conflicts, fix versions before continuing
+4. Run: `npx prisma init`
+5. **Setup Tests**: `npm install -D vitest @testing-library/react @testing-library/jest-dom happy-dom @vitejs/plugin-react`
+6. Create vitest.config.ts and src/test/setup.ts
+7. Create Prisma schema from DESIGN.md
+8. Set up Auth.js configuration using the `useActionState` + server action pattern (see Code Patterns Reference)
+9. Implement pages and components — use native `<select>` for form dropdowns, NOT Radix Select
+10. Run `npm run build`
 
 ### For Rails
 1. Scaffold: `rails new . --database=postgresql --css=tailwind`

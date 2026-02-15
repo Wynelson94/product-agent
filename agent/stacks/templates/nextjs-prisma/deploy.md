@@ -26,9 +26,23 @@ datasource db {
 }
 ```
 
-### Option 2: External PostgreSQL (Supabase, Railway, Neon)
+### Option 2: Neon (Recommended for Vercel)
+
+```bash
+# If NEON_API_KEY is available, provision a database:
+# neonctl projects create --name <project-name>
+# Then set the connection string on Vercel
+```
+
+### Option 3: External PostgreSQL (Supabase, Railway)
 
 Set `DATABASE_URL` in Vercel environment variables.
+
+### CRITICAL: No Placeholder URLs
+
+NEVER set `DATABASE_URL` to a placeholder value like `postgresql://placeholder:placeholder@placeholder.neon.tech/neondb`.
+If a real database cannot be provisioned, create `DEPLOY_BLOCKED.md` explaining that manual database setup is required.
+A placeholder URL will cause ALL runtime database queries to fail silently.
 
 ## Build Configuration
 

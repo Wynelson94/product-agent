@@ -16,22 +16,21 @@ export const prisma = globalForPrisma.prisma ?? new PrismaClient()
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 ```
 
-## Auth.js Configuration
+## Auth.js Configuration (Auth.js v5 / NextAuth v5)
 
 ### lib/auth.ts
 
 ```typescript
-import { NextAuthOptions } from 'next-auth'
+import NextAuth from 'next-auth'
 import { PrismaAdapter } from '@auth/prisma-adapter'
-import CredentialsProvider from 'next-auth/providers/credentials'
+import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { prisma } from './prisma'
 
-export const authOptions: NextAuthOptions = {
+export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   providers: [
-    CredentialsProvider({
-      name: 'credentials',
+    Credentials({
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
@@ -42,14 +41,17 @@ export const authOptions: NextAuthOptions = {
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { email: credentials.email as string },
         })
 
-        if (!user || !user.password) {
+        if (!user || !user.passwordHash) {
           return null
         }
 
-        const isValid = await bcrypt.compare(credentials.password, user.password)
+        const isValid = await bcrypt.compare(
+          credentials.password as string,
+          user.passwordHash
+        )
 
         if (!isValid) {
           return null
@@ -83,18 +85,15 @@ export const authOptions: NextAuthOptions = {
       return session
     },
   },
-}
+})
 ```
 
 ### API Route (app/api/auth/[...nextauth]/route.ts)
 
 ```typescript
-import NextAuth from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { handlers } from '@/lib/auth'
 
-const handler = NextAuth(authOptions)
-
-export { handler as GET, handler as POST }
+export const { GET, POST } = handlers
 ```
 
 ## Middleware
@@ -102,55 +101,161 @@ export { handler as GET, handler as POST }
 ### middleware.ts
 
 ```typescript
-import { withAuth } from 'next-auth/middleware'
-
-export default withAuth({
-  pages: {
-    signIn: '/login',
-  },
-})
+export { auth as middleware } from '@/lib/auth'
 
 export const config = {
   matcher: ['/dashboard/:path*', '/settings/:path*'],
 }
 ```
 
-## Server Actions
+## Auth Forms (CRITICAL — useActionState Pattern)
 
-### Signup Action
+ALWAYS use server actions with `useActionState` for auth forms.
+NEVER use `signIn()` from `next-auth/react` on the client side — it depends on
+a CSRF token fetch that fails on Next.js 16+, breaking hydration and making
+all forms non-interactive.
+
+### Login Server Action (app/login/actions.ts)
+
+```typescript
+'use server'
+
+import { signIn } from '@/lib/auth'
+import { AuthError } from 'next-auth'
+import { redirect } from 'next/navigation'
+
+export async function loginAction(
+  prevState: { error?: string } | null,
+  formData: FormData
+) {
+  const email = formData.get('email') as string
+  const password = formData.get('password') as string
+
+  if (!email || !password) {
+    return { error: 'Email and password are required.' }
+  }
+
+  try {
+    await signIn('credentials', { email, password, redirect: false })
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return { error: 'Invalid email or password.' }
+    }
+    throw e
+  }
+
+  redirect('/dashboard')
+}
+```
+
+### Login Page (app/login/page.tsx)
+
+```tsx
+'use client'
+
+import { useActionState } from 'react'
+import { loginAction } from './actions'
+
+export default function LoginPage() {
+  const [state, formAction, pending] = useActionState(loginAction, null)
+
+  return (
+    <form action={formAction}>
+      {state?.error && <div className="text-destructive">{state.error}</div>}
+      <input name="email" type="email" required />
+      <input name="password" type="password" required />
+      <button type="submit" disabled={pending}>
+        {pending ? 'Signing in...' : 'Sign in'}
+      </button>
+    </form>
+  )
+}
+```
+
+### Signup Server Action (app/signup/actions.ts)
 
 ```typescript
 'use server'
 
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
+import { signIn } from '@/lib/auth'
+import { AuthError } from 'next-auth'
 import { redirect } from 'next/navigation'
 
-export async function signup(formData: FormData) {
+export async function signUpAction(
+  prevState: { error?: string } | null,
+  formData: FormData
+) {
+  const name = formData.get('name') as string
   const email = formData.get('email') as string
   const password = formData.get('password') as string
-  const name = formData.get('name') as string
 
-  const existingUser = await prisma.user.findUnique({
-    where: { email },
-  })
-
-  if (existingUser) {
-    return { error: 'Email already in use' }
+  if (!name) return { error: 'Name is required.' }
+  if (!email) return { error: 'Email is required.' }
+  if (!password || password.length < 8) {
+    return { error: 'Password must be at least 8 characters.' }
   }
 
-  const hashedPassword = await bcrypt.hash(password, 12)
+  try {
+    const existingUser = await prisma.user.findUnique({ where: { email } })
+    if (existingUser) {
+      return { error: 'An account with this email already exists.' }
+    }
 
-  await prisma.user.create({
-    data: {
-      email,
-      password: hashedPassword,
-      name,
-    },
-  })
+    const passwordHash = await bcrypt.hash(password, 12)
+    await prisma.user.create({ data: { name, email, passwordHash } })
 
-  redirect('/login?message=Account created successfully')
+    await signIn('credentials', { email, password, redirect: false })
+  } catch (e) {
+    if (e instanceof AuthError) {
+      redirect('/login')
+    }
+    throw e
+  }
+
+  redirect('/dashboard')
 }
+```
+
+### Signup Page (app/signup/page.tsx)
+
+```tsx
+'use client'
+
+import { useActionState } from 'react'
+import { signUpAction } from './actions'
+
+export default function SignUpPage() {
+  const [state, formAction, pending] = useActionState(signUpAction, null)
+
+  return (
+    <form action={formAction}>
+      {state?.error && <div className="text-destructive">{state.error}</div>}
+      <input name="name" type="text" required />
+      <input name="email" type="email" required />
+      <input name="password" type="password" required />
+      <button type="submit" disabled={pending}>
+        {pending ? 'Creating account...' : 'Sign up'}
+      </button>
+    </form>
+  )
+}
+```
+
+## Form Dropdowns
+
+ALWAYS use native `<select>` elements in forms instead of Radix UI Select components.
+Radix Select requires JavaScript hydration to function. If hydration fails (which can
+happen with auth provider issues), native `<select>` still works as a standard HTML element.
+
+```tsx
+<select name="categoryId" required defaultValue="">
+  <option value="" disabled>Select a category</option>
+  {categories.map((cat) => (
+    <option key={cat.id} value={cat.id}>{cat.name}</option>
+  ))}
+</select>
 ```
 
 ## Data Fetching

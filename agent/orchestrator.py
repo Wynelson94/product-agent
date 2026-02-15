@@ -231,6 +231,8 @@ async def build_product(
             met = audit_validation.extracted["requirements_met"]
             total = audit_validation.extracted.get("requirements_total", "?")
             state.spec_audit_discrepancies = max(0, (total if isinstance(total, int) else 0) - met)
+        elif audit_validation.extracted.get("discrepancies"):
+            state.spec_audit_discrepancies = audit_validation.extracted["discrepancies"]
 
         # Process test results
         test_detail = ""
@@ -242,7 +244,7 @@ async def build_product(
         else:
             state.tests_passed = test_call.success
 
-        state.tests_generated = True
+        state.tests_generated = test_validation.passed
         state.transition_to(Phase.TEST, f"Tests: {test_detail}")
         checkpoint_mgr.save(state)
 
