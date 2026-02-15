@@ -1,6 +1,7 @@
-"""Progress streaming for Product Agent v8.0.
+"""Progress streaming for Product Agent v9.0.
 
-Provides real-time phase progress output during builds.
+Provides real-time phase-by-phase progress output during builds.
+Writes to stderr so stdout remains clean for programmatic use.
 """
 
 import sys
@@ -42,6 +43,7 @@ class ProgressReporter:
         self._phase_count += 1
         label = f"[{self._phase_count}/{self._total_phases}]"
         msg = f"{label} {phase_name}..."
+        # \r = carriage return: overwrites current line for in-place progress updates
         self.output.write(f"\r{msg:<55}")
         self.output.flush()
 

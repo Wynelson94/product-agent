@@ -1,4 +1,8 @@
-"""Configuration and environment variables."""
+"""Configuration and environment variables.
+
+All settings are loaded from environment variables at import time.
+Defaults are tuned for typical builds. Override via env vars or .env files.
+"""
 
 import os
 from pathlib import Path
