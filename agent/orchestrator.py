@@ -14,11 +14,12 @@ from typing import Optional
 
 from .state import AgentState, Phase, create_initial_state
 from .checkpoints import CheckpointManager
-from .validators import validate_phase_output
+from .validators import validate_phase_output, validate_build_routes
 from .progress import ProgressReporter, PhaseResult
 from .phases import run_phase, get_phase_config
 from .cli_runner import PhaseCallResult
 from .quality import compute_quality_score
+from .sanitize import sanitize_idea
 from . import config
 
 
@@ -71,6 +72,9 @@ async def build_product(
     project_path = Path(project_dir).resolve()
     project_path.mkdir(parents=True, exist_ok=True)
 
+    # v9.0: Sanitize user input before it enters any prompts
+    idea = sanitize_idea(idea)
+
     # Initialize state
     state = create_initial_state(idea, str(project_path))
     if cfg.stack:
@@ -93,9 +97,23 @@ async def build_product(
     # Initialize checkpoint manager
     checkpoint_mgr = CheckpointManager(str(project_path))
 
+    # v9.0: Track total turns across all phases
+    total_turns = 0
+
     # Handle enhancement mode setup
     if cfg.mode == "enhancement" and cfg.design_file:
         _setup_enhancement_mode(state, cfg, project_path)
+
+    def _track_turns(call_result: PhaseCallResult) -> None:
+        """Accumulate turns and raise if limit exceeded."""
+        nonlocal total_turns
+        turns = call_result.num_turns if isinstance(call_result.num_turns, int) else 0
+        total_turns += turns
+        max_turns = getattr(config, 'MAX_TOTAL_TURNS', 300)
+        if isinstance(max_turns, int) and total_turns > max_turns:
+            raise _TurnLimitExceeded(
+                f"Total turns ({total_turns}) exceeded limit ({max_turns})"
+            )
 
     try:
         # ---------------------------------------------------------------
@@ -107,6 +125,7 @@ async def build_product(
             call, validation = await run_phase(
                 Phase.ENRICH, state, project_path, progress
             )
+            _track_turns(call)
             if not call.success:
                 progress.log(f"Enrichment failed: {call.error}")
                 # Non-fatal — continue without enrichment
@@ -121,6 +140,7 @@ async def build_product(
         call, validation = await run_phase(
             Phase.ANALYSIS, state, project_path, progress
         )
+        _track_turns(call)
         if not call.success:
             return _build_failed(progress, "Analysis failed", call.error)
 
@@ -146,6 +166,7 @@ async def build_product(
             call, validation = await run_phase(
                 Phase.DESIGN, state, project_path, progress
             )
+            _track_turns(call)
             if not call.success:
                 return _build_failed(progress, "Design failed", call.error)
             state.transition_to(Phase.DESIGN, f"Revision {revision}")
@@ -155,6 +176,7 @@ async def build_product(
             call, review_validation = await run_phase(
                 Phase.REVIEW, state, project_path, progress
             )
+            _track_turns(call)
             if not call.success:
                 progress.log("Review call failed — treating as approved")
                 approved = True
@@ -188,20 +210,36 @@ async def build_product(
                 Phase.BUILD, state, project_path, progress,
                 retry_context=retry_context,
             )
+            _track_turns(call)
 
             # Check if source code was produced
             build_validation = validate_phase_output(Phase.BUILD, project_path)
-            if call.success and build_validation.passed:
-                build_succeeded = True
-                break
+            if not call.success or not build_validation.passed:
+                error_msg = call.error or "Build produced no source code"
+                for msg in build_validation.messages:
+                    if "FAIL" in msg:
+                        error_msg += f"\n{msg}"
+                retry_context = error_msg
+                progress.log(f"Build attempt {attempt + 1} failed: {error_msg[:200]}")
+                continue
 
-            # Build failed — prepare retry context
-            error_msg = call.error or "Build produced no source code"
-            for msg in build_validation.messages:
-                if "FAIL" in msg:
-                    error_msg += f"\n{msg}"
-            retry_context = error_msg
-            progress.log(f"Build attempt {attempt + 1} failed: {error_msg[:200]}")
+            # v9.0: Route validation — strict on final attempt
+            is_final = attempt == max_attempts - 1
+            route_check = validate_build_routes(project_path, strict=is_final)
+            missing = route_check.extracted.get("missing_routes", [])
+            if missing and is_final:
+                # Final attempt: missing routes are errors
+                for msg in route_check.messages:
+                    if "FAIL" in msg:
+                        progress.log(msg)
+            elif missing:
+                # Non-final: report as warnings, inject into retry context
+                retry_context = f"Missing routes from DESIGN.md: {', '.join(missing[:5])}"
+                progress.log(f"Build attempt {attempt + 1}: {len(missing)} missing routes")
+                continue
+
+            build_succeeded = True
+            break
 
         if not build_succeeded:
             return _build_failed(
@@ -225,6 +263,8 @@ async def build_product(
         (audit_call, audit_validation), (test_call, test_validation) = await asyncio.gather(
             audit_task, test_task
         )
+        _track_turns(audit_call)
+        _track_turns(test_call)
 
         # Process audit results
         state.spec_audit_completed = True
@@ -263,24 +303,37 @@ async def build_product(
         call, deploy_validation = await run_phase(
             Phase.DEPLOY, state, project_path, progress
         )
+        _track_turns(call)
 
         if deploy_validation.extracted.get("url"):
             state.deployment_url = deploy_validation.extracted["url"]
 
-        state.transition_to(Phase.DEPLOY, state.deployment_url or "deployed")
-        checkpoint_mgr.save(state)
+        # v9.0: Check for DEPLOY_BLOCKED.md or placeholder DATABASE_URL
+        deploy_blocked = (project_path / "DEPLOY_BLOCKED.md").exists()
+        db_placeholder = deploy_validation.extracted.get("database_placeholder", False)
+        if deploy_blocked or db_placeholder:
+            reason = "database not configured" if db_placeholder else "deployment blocked"
+            progress.log(f"Skipping verification: {reason}")
+            state.deployment_verified = False
+            state.transition_to(Phase.DEPLOY, f"BLOCKED: {reason}")
+            checkpoint_mgr.save(state)
+        else:
+            state.transition_to(Phase.DEPLOY, state.deployment_url or "deployed")
+            checkpoint_mgr.save(state)
 
         # ---------------------------------------------------------------
-        # Phase 9: Verify
+        # Phase 9: Verify (skip if deploy was blocked)
         # ---------------------------------------------------------------
-        call, verify_validation = await run_phase(
-            Phase.VERIFY, state, project_path, progress
-        )
+        if not deploy_blocked and not db_placeholder:
+            call, verify_validation = await run_phase(
+                Phase.VERIFY, state, project_path, progress
+            )
+            _track_turns(call)
 
-        verified = verify_validation.extracted.get("verified", False)
-        state.deployment_verified = verified
-        state.transition_to(Phase.VERIFY, "Passed" if verified else "Partial")
-        checkpoint_mgr.save(state)
+            verified = verify_validation.extracted.get("verified", False)
+            state.deployment_verified = verified
+            state.transition_to(Phase.VERIFY, "Passed" if verified else "Partial")
+            checkpoint_mgr.save(state)
 
         # ---------------------------------------------------------------
         # Build complete
@@ -304,6 +357,14 @@ async def build_product(
         progress.build_complete(state.deployment_url, quality)
         return result
 
+    except _TurnLimitExceeded as e:
+        state.mark_failed(str(e))
+        checkpoint_mgr.save(state)
+        progress.build_failed(str(e))
+        return BuildResult(success=False, reason=str(e),
+                           duration_s=progress.total_duration_s,
+                           phase_results=progress.results)
+
     except KeyboardInterrupt:
         state.mark_failed("Interrupted by user")
         checkpoint_mgr.save(state)
@@ -317,6 +378,11 @@ async def build_product(
         progress.build_failed(str(e))
         return BuildResult(success=False, reason=str(e),
                            duration_s=progress.total_duration_s)
+
+
+class _TurnLimitExceeded(Exception):
+    """Raised when total turns across all phases exceeds MAX_TOTAL_TURNS."""
+    pass
 
 
 def _build_failed(progress: ProgressReporter, reason: str, detail: str) -> BuildResult:

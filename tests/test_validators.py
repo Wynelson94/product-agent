@@ -1,4 +1,4 @@
-"""Tests for phase output validators (v8.0)."""
+"""Tests for phase output validators (v9.0)."""
 
 import pytest
 
@@ -6,6 +6,7 @@ from agent.state import Phase
 from agent.validators import (
     ValidationResult,
     validate_phase_output,
+    validate_build_routes,
     _validate_enrich,
     _validate_analysis,
     _validate_design,
@@ -17,6 +18,9 @@ from agent.validators import (
     _validate_verify,
     _extract_url,
     _extract_stack_id,
+    _extract_design_routes,
+    _route_to_page_path,
+    _parse_frontmatter,
 )
 
 
@@ -74,6 +78,85 @@ class TestValidationResult:
         r = ValidationResult(passed=True, phase=Phase.ANALYSIS)
         r.extracted["stack_id"] = "rails"
         assert r.extracted == {"stack_id": "rails"}
+
+
+# ---------------------------------------------------------------------------
+# _parse_frontmatter (v9.0)
+# ---------------------------------------------------------------------------
+
+class TestParseFrontmatter:
+
+    def test_simple_string_values(self):
+        content = "---\nstack_id: nextjs-supabase\nproduct_type: saas\n---\n# Body"
+        fm = _parse_frontmatter(content)
+        assert fm == {"stack_id": "nextjs-supabase", "product_type": "saas"}
+
+    def test_integer_values(self):
+        content = "---\ntests_passed: 10\ntests_total: 12\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["tests_passed"] == 10
+        assert fm["tests_total"] == 12
+
+    def test_boolean_values(self):
+        content = "---\nverified: true\nall_passed: false\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["verified"] is True
+        assert fm["all_passed"] is False
+
+    def test_boolean_yes_no(self):
+        content = "---\nverified: yes\nall_passed: no\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["verified"] is True
+        assert fm["all_passed"] is False
+
+    def test_null_values(self):
+        content = "---\nerror: null\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["error"] is None
+
+    def test_quoted_string_values(self):
+        content = '---\nurl: "https://app.vercel.app"\nverdict: \'APPROVED\'\n---\n'
+        fm = _parse_frontmatter(content)
+        assert fm["url"] == "https://app.vercel.app"
+        assert fm["verdict"] == "APPROVED"
+
+    def test_float_values(self):
+        content = "---\nscore: 85.5\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["score"] == 85.5
+
+    def test_no_frontmatter_returns_none(self):
+        content = "# Just a markdown file\n\nNo front-matter here."
+        assert _parse_frontmatter(content) is None
+
+    def test_empty_frontmatter_returns_none(self):
+        content = "---\n---\n# Body"
+        assert _parse_frontmatter(content) is None
+
+    def test_missing_closing_delimiter(self):
+        content = "---\nkey: value\n# No closing delimiter"
+        assert _parse_frontmatter(content) is None
+
+    def test_leading_whitespace_stripped(self):
+        content = "\n\n---\nstack_id: rails\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["stack_id"] == "rails"
+
+    def test_comments_ignored(self):
+        content = "---\n# this is a comment\nstack_id: rails\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm == {"stack_id": "rails"}
+
+    def test_empty_string(self):
+        assert _parse_frontmatter("") is None
+
+    def test_mixed_types(self):
+        content = "---\nverdict: APPROVED\nissues_count: 0\nverified: true\nurl: https://a.vercel.app\n---\n"
+        fm = _parse_frontmatter(content)
+        assert fm["verdict"] == "APPROVED"
+        assert fm["issues_count"] == 0
+        assert fm["verified"] is True
+        assert fm["url"] == "https://a.vercel.app"
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +362,30 @@ class TestValidateAnalysis:
             assert result.passed is True, f"Stack {sid} should be valid"
             assert result.extracted["stack_id"] == sid
 
+    def test_frontmatter_stack_id(self, tmp_path):
+        (tmp_path / "STACK_DECISION.md").write_text(
+            "---\nstack_id: nextjs-prisma\n---\n# Stack Decision\n"
+        )
+        result = _validate_analysis(tmp_path)
+        assert result.passed is True
+        assert result.extracted["stack_id"] == "nextjs-prisma"
+        assert any("front-matter" in m for m in result.messages)
+
+    def test_frontmatter_unknown_stack(self, tmp_path):
+        (tmp_path / "STACK_DECISION.md").write_text(
+            "---\nstack_id: django-postgres\n---\n# Stack Decision\n"
+        )
+        result = _validate_analysis(tmp_path)
+        assert result.passed is False
+        assert any("Unknown" in m for m in result.messages)
+
+    def test_frontmatter_takes_precedence_over_body(self, tmp_path):
+        (tmp_path / "STACK_DECISION.md").write_text(
+            "---\nstack_id: rails\n---\n**Stack ID**: `nextjs-supabase`\n"
+        )
+        result = _validate_analysis(tmp_path)
+        assert result.extracted["stack_id"] == "rails"
+
 
 # ---------------------------------------------------------------------------
 # _validate_design
@@ -413,6 +520,29 @@ class TestValidateReview:
         (tmp_path / "REVIEW.md").write_text(feedback_text)
         result = _validate_review(tmp_path)
         assert result.extracted["feedback"] == feedback_text
+
+    def test_review_frontmatter_approved(self, tmp_path):
+        (tmp_path / "REVIEW.md").write_text(
+            "---\nverdict: APPROVED\nissues_count: 0\n---\n# Design Review\n"
+        )
+        result = _validate_review(tmp_path)
+        assert result.extracted["approved"] is True
+        assert any("front-matter" in m for m in result.messages)
+
+    def test_review_frontmatter_needs_revision(self, tmp_path):
+        (tmp_path / "REVIEW.md").write_text(
+            "---\nverdict: NEEDS_REVISION\nissues_count: 3\n---\n# Review\nFix auth.\n"
+        )
+        result = _validate_review(tmp_path)
+        assert result.extracted["approved"] is False
+
+    def test_review_frontmatter_unknown_verdict(self, tmp_path):
+        (tmp_path / "REVIEW.md").write_text(
+            "---\nverdict: MAYBE\n---\n# Review\n"
+        )
+        result = _validate_review(tmp_path)
+        assert result.extracted["approved"] is False
+        assert result.extracted["verdict_uncertain"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +725,32 @@ class TestValidateAudit:
         assert result.extracted["requirements_met"] == 10
         assert result.extracted["requirements_total"] == 10
 
+    def test_audit_frontmatter_counts(self, tmp_path):
+        (tmp_path / "SPEC_AUDIT.md").write_text(
+            "---\nstatus: PASS\nrequirements_met: 9\nrequirements_total: 10\ndiscrepancies: 1\n---\n# Audit\n"
+        )
+        result = _validate_audit(tmp_path)
+        assert result.passed is True
+        assert result.extracted["requirements_met"] == 9
+        assert result.extracted["requirements_total"] == 10
+        assert result.extracted["discrepancies"] == 1
+        assert result.extracted["passed"] is True
+
+    def test_audit_frontmatter_needs_fix(self, tmp_path):
+        (tmp_path / "SPEC_AUDIT.md").write_text(
+            "---\nstatus: NEEDS_FIX\nrequirements_met: 3\nrequirements_total: 10\n---\n# Audit\n"
+        )
+        result = _validate_audit(tmp_path)
+        assert result.extracted["passed"] is False
+
+    def test_audit_frontmatter_takes_precedence(self, tmp_path):
+        (tmp_path / "SPEC_AUDIT.md").write_text(
+            "---\nstatus: PASS\nrequirements_met: 7\nrequirements_total: 10\n---\n5 / 10 fail"
+        )
+        result = _validate_audit(tmp_path)
+        assert result.extracted["requirements_met"] == 7
+        assert result.extracted["passed"] is True
+
 
 # ---------------------------------------------------------------------------
 # _validate_test
@@ -684,6 +840,32 @@ class TestValidateTest:
         result = _validate_test(tmp_path)
         assert result.extracted["all_passed"] is True
 
+    def test_test_frontmatter_counts(self, tmp_path):
+        (tmp_path / "TEST_RESULTS.md").write_text(
+            "---\ntests_passed: 10\ntests_total: 12\nall_passed: false\n---\n# Results\n"
+        )
+        result = _validate_test(tmp_path)
+        assert result.extracted["tests_passed"] == 10
+        assert result.extracted["tests_total"] == 12
+        assert result.extracted["all_passed"] is False
+        assert result.passed is False  # all_passed=false triggers error
+
+    def test_test_frontmatter_all_passed(self, tmp_path):
+        (tmp_path / "TEST_RESULTS.md").write_text(
+            "---\ntests_passed: 5\ntests_total: 5\nall_passed: true\n---\n"
+        )
+        result = _validate_test(tmp_path)
+        assert result.extracted["all_passed"] is True
+        assert result.passed is True
+
+    def test_test_frontmatter_takes_precedence(self, tmp_path):
+        (tmp_path / "TEST_RESULTS.md").write_text(
+            "---\ntests_passed: 8\ntests_total: 10\n---\n3 / 5 passed"
+        )
+        result = _validate_test(tmp_path)
+        assert result.extracted["tests_passed"] == 8
+        assert result.extracted["tests_total"] == 10
+
 
 # ---------------------------------------------------------------------------
 # _validate_deploy
@@ -763,6 +945,46 @@ class TestValidateDeploy:
         result = _validate_deploy(tmp_path)
         assert result.extracted["url"] == "https://my-api.onrender.com"
 
+    def test_deploy_frontmatter_url(self, tmp_path):
+        (tmp_path / "DEPLOYMENT.md").write_text(
+            "---\nurl: https://myapp.vercel.app\nstatus: success\n---\n# Deploy\n"
+        )
+        result = _validate_deploy(tmp_path)
+        assert result.passed is True
+        assert result.extracted["url"] == "https://myapp.vercel.app"
+        assert any("front-matter" in m for m in result.messages)
+
+    def test_deploy_frontmatter_takes_precedence(self, tmp_path):
+        (tmp_path / "DEPLOYMENT.md").write_text(
+            "---\nurl: https://fm.vercel.app\n---\nLive at https://body.vercel.app"
+        )
+        result = _validate_deploy(tmp_path)
+        assert result.extracted["url"] == "https://fm.vercel.app"
+
+    def test_deploy_placeholder_database_url(self, tmp_path):
+        (tmp_path / "DEPLOYMENT.md").write_text(
+            "# Deployment\n\nDATABASE_URL=placeholder\nDeployed to https://app.vercel.app"
+        )
+        result = _validate_deploy(tmp_path)
+        assert result.extracted.get("database_placeholder") is True
+        assert result.passed is False
+
+    def test_deploy_localhost_database_url(self, tmp_path):
+        (tmp_path / "DEPLOYMENT.md").write_text(
+            "# Deployment\n\nDATABASE_URL=postgres://user:password@localhost:5432/db"
+        )
+        result = _validate_deploy(tmp_path)
+        assert result.extracted.get("database_placeholder") is True
+        assert result.passed is False
+
+    def test_deploy_real_database_url_no_flag(self, tmp_path):
+        (tmp_path / "DEPLOYMENT.md").write_text(
+            "# Deployment\n\nDATABASE_URL=postgres://user:pass@db.supabase.co:5432/postgres\n"
+            "Deployed to https://app.vercel.app"
+        )
+        result = _validate_deploy(tmp_path)
+        assert result.extracted.get("database_placeholder") is not True
+
 
 # ---------------------------------------------------------------------------
 # _validate_verify
@@ -810,6 +1032,174 @@ class TestValidateVerify:
         (tmp_path / "VERIFICATION.md").write_text("PASS")
         result = _validate_verify(tmp_path)
         assert result.extracted["verified"] is True
+
+    def test_verify_frontmatter_passed(self, tmp_path):
+        (tmp_path / "VERIFICATION.md").write_text(
+            "---\nverified: true\nendpoints_tested: 5\nendpoints_passed: 5\n---\n# Verification\n"
+        )
+        result = _validate_verify(tmp_path)
+        assert result.passed is True
+        assert result.extracted["verified"] is True
+        assert result.extracted["endpoints_tested"] == 5
+        assert result.extracted["endpoints_passed"] == 5
+
+    def test_verify_frontmatter_failed(self, tmp_path):
+        (tmp_path / "VERIFICATION.md").write_text(
+            "---\nverified: false\nendpoints_tested: 5\nendpoints_passed: 2\n---\n# Verification\n"
+        )
+        result = _validate_verify(tmp_path)
+        assert result.passed is False
+        assert result.extracted["verified"] is False
+
+    def test_verify_frontmatter_takes_precedence(self, tmp_path):
+        (tmp_path / "VERIFICATION.md").write_text(
+            "---\nverified: false\n---\nAll checks pass!"
+        )
+        result = _validate_verify(tmp_path)
+        assert result.extracted["verified"] is False
+
+
+# ---------------------------------------------------------------------------
+# Route extraction and build route validation (v9.0)
+# ---------------------------------------------------------------------------
+
+class TestExtractDesignRoutes:
+
+    def test_no_design_file(self, tmp_path):
+        assert _extract_design_routes(tmp_path) == []
+
+    def test_extracts_routes_from_table(self, tmp_path):
+        design = (
+            "# Design\n\n"
+            "## Routes\n"
+            "| Route | Purpose | Auth |\n"
+            "|-------|---------|------|\n"
+            "| / | Landing | No |\n"
+            "| /login | Auth | No |\n"
+            "| /dashboard | Main | Yes |\n"
+        )
+        (tmp_path / "DESIGN.md").write_text(design)
+        routes = _extract_design_routes(tmp_path)
+        assert "/" in routes
+        assert "/login" in routes
+        assert "/dashboard" in routes
+
+    def test_skips_api_routes(self, tmp_path):
+        design = (
+            "| /login | Auth | No |\n"
+            "| /api/users | API | Yes |\n"
+            "| /api/items | API | Yes |\n"
+        )
+        (tmp_path / "DESIGN.md").write_text(design)
+        routes = _extract_design_routes(tmp_path)
+        assert "/login" in routes
+        assert "/api/users" not in routes
+        assert "/api/items" not in routes
+
+    def test_handles_dynamic_routes(self, tmp_path):
+        design = "| /projects/[id] | Detail | Yes |\n"
+        (tmp_path / "DESIGN.md").write_text(design)
+        routes = _extract_design_routes(tmp_path)
+        assert "/projects/[id]" in routes
+
+
+class TestRouteToPagePath:
+
+    def test_root_route(self):
+        assert _route_to_page_path("/") == "src/app/page.tsx"
+
+    def test_single_segment(self):
+        assert _route_to_page_path("/login") == "src/app/login/page.tsx"
+
+    def test_nested_route(self):
+        assert _route_to_page_path("/dashboard/settings") == "src/app/dashboard/settings/page.tsx"
+
+    def test_dynamic_route(self):
+        assert _route_to_page_path("/projects/[id]") == "src/app/projects/[id]/page.tsx"
+
+
+class TestValidateBuildRoutes:
+
+    def test_no_design_file(self, tmp_path):
+        result = validate_build_routes(tmp_path)
+        assert result.passed is True
+        assert any("No routes extracted" in m for m in result.messages)
+
+    def test_all_routes_present(self, tmp_path):
+        design = (
+            "| Route | Purpose |\n"
+            "|-------|---------|\n"
+            "| / | Home |\n"
+            "| /login | Auth |\n"
+        )
+        (tmp_path / "DESIGN.md").write_text(design)
+        (tmp_path / "src" / "app").mkdir(parents=True)
+        (tmp_path / "src" / "app" / "page.tsx").write_text("export default function() {}")
+        (tmp_path / "src" / "app" / "login").mkdir()
+        (tmp_path / "src" / "app" / "login" / "page.tsx").write_text("export default function() {}")
+        result = validate_build_routes(tmp_path)
+        assert result.passed is True
+        assert result.extracted["missing_routes"] == []
+        assert any("All 2 routes found" in m for m in result.messages)
+
+    def test_missing_routes_non_strict(self, tmp_path):
+        design = (
+            "| / | Home |\n"
+            "| /login | Auth |\n"
+            "| /dashboard | Main |\n"
+        )
+        (tmp_path / "DESIGN.md").write_text(design)
+        (tmp_path / "src" / "app").mkdir(parents=True)
+        (tmp_path / "src" / "app" / "page.tsx").write_text("code")
+        result = validate_build_routes(tmp_path, strict=False)
+        assert result.passed is True  # Non-strict = warnings only
+        assert "/login" in result.extracted["missing_routes"]
+        assert "/dashboard" in result.extracted["missing_routes"]
+
+    def test_missing_routes_strict(self, tmp_path):
+        design = "| /login | Auth |\n| /signup | Register |\n"
+        (tmp_path / "DESIGN.md").write_text(design)
+        result = validate_build_routes(tmp_path, strict=True)
+        assert result.passed is False
+        assert any("FAIL" in m for m in result.messages)
+
+    def test_prisma_schema_check(self, tmp_path):
+        (tmp_path / "DESIGN.md").write_text("No routes here")
+        (tmp_path / "prisma").mkdir()
+        (tmp_path / "prisma" / "schema.prisma").write_text(
+            "model User {\n  id String @id\n}\nmodel Post {\n  id String @id\n}\n"
+        )
+        result = validate_build_routes(tmp_path)
+        assert any("2 models" in m for m in result.messages)
+
+    def test_prisma_schema_missing(self, tmp_path):
+        (tmp_path / "DESIGN.md").write_text("No routes")
+        (tmp_path / "prisma").mkdir()
+        result = validate_build_routes(tmp_path, strict=True)
+        assert result.passed is False
+        assert any("schema.prisma is missing" in m for m in result.messages)
+
+    def test_auth_middleware_present(self, tmp_path):
+        (tmp_path / "DESIGN.md").write_text("## Auth\nJWT tokens used for auth")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "middleware.ts").write_text("export function middleware() {}")
+        result = validate_build_routes(tmp_path)
+        assert any("middleware" in m for m in result.messages)
+
+    def test_auth_middleware_missing_strict(self, tmp_path):
+        (tmp_path / "DESIGN.md").write_text("## Auth\nUser authentication required")
+        result = validate_build_routes(tmp_path, strict=True)
+        assert result.passed is False
+        assert any("middleware" in m for m in result.messages)
+
+    def test_app_dir_without_src_prefix(self, tmp_path):
+        design = "| / | Home |\n"
+        (tmp_path / "DESIGN.md").write_text(design)
+        # Some projects use app/ instead of src/app/
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "page.tsx").write_text("code")
+        result = validate_build_routes(tmp_path)
+        assert result.extracted["missing_routes"] == []
 
 
 # ---------------------------------------------------------------------------

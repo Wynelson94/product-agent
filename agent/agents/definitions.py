@@ -132,9 +132,14 @@ If the idea is iOS-only with local-first storage, Swift is the right choice.
 
 ## Output Format
 
-Create STACK_DECISION.md with this exact structure:
+Create STACK_DECISION.md with YAML front-matter followed by markdown body:
 
 ```markdown
+---
+stack_id: nextjs-supabase
+product_type: saas
+deployment_target: vercel
+---
 # Stack Decision
 
 ## Product Analysis
@@ -375,9 +380,13 @@ This is a protocol-level requirement, not a style preference.
 
 ## Output Format
 
-Create REVIEW.md with:
+Create REVIEW.md with YAML front-matter followed by markdown body:
 
 ```markdown
+---
+verdict: APPROVED
+issues_count: 0
+---
 # Design Review
 
 ## Status: [APPROVED / NEEDS_REVISION]
@@ -703,6 +712,17 @@ For Supabase: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 For Prisma: DATABASE_URL (must be PostgreSQL, not SQLite)
 For Auth: JWT_SECRET or similar
 
+### 5. DATABASE_URL Validation (v9.0 — CRITICAL)
+After deployment, check that DATABASE_URL is NOT a placeholder or localhost:
+```bash
+# Check Vercel env vars
+npx vercel env ls 2>/dev/null | grep DATABASE_URL
+```
+If DATABASE_URL contains "placeholder", "localhost", "your_database_url", or is empty:
+- Create DEPLOY_BLOCKED.md explaining that the database is not configured
+- The app WILL be broken at runtime without a real database connection
+- STOP deployment and report the blocker
+
 ## If Compatibility Issue Found
 
 Create DEPLOY_BLOCKED.md:
@@ -867,6 +887,16 @@ If deployment fails:
 5. If env var missing: document for user
 
 ## Output
+
+Create DEPLOYMENT.md with YAML front-matter:
+```markdown
+---
+url: https://your-app.vercel.app
+status: success
+---
+# Deployment Complete
+[details]
+```
 
 Success:
 "Your app is live at https://[deployment-url]"
@@ -1205,9 +1235,15 @@ curl -s -X POST https://[deployed-url]/api/auth/login \\
 
 ## Output Format
 
-Create VERIFICATION.md with:
+Create VERIFICATION.md with YAML front-matter followed by markdown body:
 
 ```markdown
+---
+verified: true
+status: PASSED
+endpoints_tested: 5
+endpoints_passed: 5
+---
 # Deployment Verification
 
 ## URL: [deployed-url]
@@ -1482,9 +1518,14 @@ npm test
 
 ## Output Format
 
-Create TEST_RESULTS.md with:
+Create TEST_RESULTS.md with YAML front-matter followed by markdown body:
 
 ```markdown
+---
+tests_passed: 10
+tests_total: 12
+all_passed: false
+---
 # Test Results
 
 ## Summary
@@ -1680,9 +1721,15 @@ Compare specific values between ORIGINAL_PROMPT.md and the source code:
 
 ## Output Format
 
-Create SPEC_AUDIT.md:
+Create SPEC_AUDIT.md with YAML front-matter followed by markdown body:
 
 ```markdown
+---
+status: PASS
+requirements_met: 8
+requirements_total: 10
+discrepancies: 2
+---
 # Spec Audit Report
 
 ## Status: [PASS / NEEDS_FIX]

@@ -1,7 +1,10 @@
-"""Phase output validators for Product Agent v8.0.
+"""Phase output validators for Product Agent v9.0.
 
 Code-level validation between phases. Each validator checks that the
 previous phase produced its required artifacts with expected content.
+
+v9.0: Artifacts use YAML front-matter as the primary structured data
+contract. Regex parsing is kept as a fallback for backwards compatibility.
 """
 
 import re
@@ -10,6 +13,63 @@ from pathlib import Path
 
 from .state import Phase
 from .stacks.criteria import STACKS
+
+
+def _parse_frontmatter(content: str) -> dict | None:
+    """Parse YAML front-matter from the start of a markdown file.
+
+    Expects the document to start with ``---`` followed by key: value lines
+    and closed by another ``---``.  Returns a dict of parsed values or None
+    if no valid front-matter is found.
+
+    Handles string, int, float, and boolean values.  Does NOT depend on
+    PyYAML — we only need flat key-value pairs.
+    """
+    content = content.lstrip()
+    if not content.startswith("---"):
+        return None
+
+    end = content.find("---", 3)
+    if end == -1:
+        return None
+
+    block = content[3:end].strip()
+    if not block:
+        return None
+
+    result: dict = {}
+    for line in block.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+
+        # Strip optional quotes
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+
+        # Type coercion
+        lower = value.lower()
+        if lower in ("true", "yes"):
+            result[key] = True
+        elif lower in ("false", "no"):
+            result[key] = False
+        elif lower in ("null", "none", "~", ""):
+            result[key] = None
+        else:
+            try:
+                result[key] = int(value)
+            except ValueError:
+                try:
+                    result[key] = float(value)
+                except ValueError:
+                    result[key] = value
+
+    return result if result else None
 
 
 @dataclass
@@ -88,7 +148,19 @@ def _validate_analysis(project_dir: Path) -> ValidationResult:
 
     content = stack_file.read_text()
 
-    # Extract stack ID
+    # Try front-matter first (v9.0)
+    fm = _parse_frontmatter(content)
+    if fm and fm.get("stack_id"):
+        stack_id = str(fm["stack_id"])
+        if stack_id in STACKS:
+            result.extracted["stack_id"] = stack_id
+            result.add_info(f"Stack selected (front-matter): {stack_id}")
+            return result
+        else:
+            result.add_error(f"Unknown stack ID in front-matter: {stack_id}")
+            return result
+
+    # Fallback: regex parsing
     stack_id = _extract_stack_id(content)
     if stack_id:
         if stack_id in STACKS:
@@ -115,6 +187,131 @@ def _extract_stack_id(content: str) -> str | None:
     if match:
         return match.group(1).strip('`')
     return None
+
+
+def _extract_design_routes(project_dir: Path) -> list[str]:
+    """Extract expected routes from DESIGN.md.
+
+    Parses the Pages/Routes table for route paths like ``/login``,
+    ``/dashboard``, ``/api/items``, etc.
+
+    Returns:
+        List of route paths (e.g., ["/", "/login", "/dashboard"])
+    """
+    design_file = project_dir / "DESIGN.md"
+    if not design_file.exists():
+        return []
+
+    content = design_file.read_text()
+    routes: list[str] = []
+
+    # Match markdown table rows with route paths: | /some/route | ...
+    for match in re.finditer(r'\|\s*(/[\w/\-\[\]:]*)\s*\|', content):
+        route = match.group(1).strip()
+        if route and not route.startswith("/api"):  # Skip API routes
+            routes.append(route)
+
+    return routes
+
+
+def _route_to_page_path(route: str) -> str:
+    """Convert a route path to the expected Next.js App Router page file.
+
+    Examples:
+        "/" → "src/app/page.tsx"
+        "/login" → "src/app/login/page.tsx"
+        "/dashboard/[id]" → "src/app/dashboard/[id]/page.tsx"
+    """
+    if route == "/":
+        return "src/app/page.tsx"
+    segments = route.strip("/").split("/")
+    return f"src/app/{'/'.join(segments)}/page.tsx"
+
+
+def validate_build_routes(
+    project_dir: Path,
+    strict: bool = False,
+) -> ValidationResult:
+    """Validate that expected routes from DESIGN.md have corresponding files.
+
+    Args:
+        project_dir: Project directory
+        strict: If True, missing routes are errors; otherwise info/warnings
+
+    Returns:
+        ValidationResult with missing_routes in extracted dict
+    """
+    result = ValidationResult(passed=True, phase=Phase.BUILD)
+    project_dir = Path(project_dir)
+
+    expected_routes = _extract_design_routes(project_dir)
+    if not expected_routes:
+        result.add_info("No routes extracted from DESIGN.md — skipping route check")
+        # Fall through to Prisma/middleware checks below
+    else:
+        missing: list[str] = []
+        found: list[str] = []
+
+        for route in expected_routes:
+            page_path = _route_to_page_path(route)
+            if (project_dir / page_path).exists():
+                found.append(route)
+            elif (project_dir / page_path.replace(".tsx", ".ts")).exists():
+                found.append(route)
+            elif (project_dir / page_path.replace("src/app/", "app/")).exists():
+                found.append(route)
+            else:
+                missing.append(route)
+
+        result.extracted["expected_routes"] = len(expected_routes)
+        result.extracted["found_routes"] = len(found)
+        result.extracted["missing_routes"] = missing
+
+        if missing:
+            msg = f"Missing {len(missing)}/{len(expected_routes)} routes: {', '.join(missing[:5])}"
+            if strict:
+                result.add_error(msg)
+            else:
+                result.add_info(msg)
+        else:
+            result.add_info(f"All {len(expected_routes)} routes found")
+
+    # Check for Prisma schema (if prisma stack)
+    if (project_dir / "prisma").exists():
+        schema = project_dir / "prisma" / "schema.prisma"
+        if not schema.exists():
+            msg = "prisma/ directory exists but schema.prisma is missing"
+            if strict:
+                result.add_error(msg)
+            else:
+                result.add_info(msg)
+        else:
+            schema_content = schema.read_text()
+            model_count = len(re.findall(r'^model\s+\w+', schema_content, re.MULTILINE))
+            if model_count == 0:
+                msg = "schema.prisma has no models defined"
+                if strict:
+                    result.add_error(msg)
+                else:
+                    result.add_info(msg)
+            else:
+                result.add_info(f"Prisma schema: {model_count} models")
+
+    # Check for middleware.ts (auth stacks)
+    design = project_dir / "DESIGN.md"
+    if design.exists() and "auth" in design.read_text().lower():
+        for mw_path in ["src/middleware.ts", "middleware.ts", "src/middleware.js"]:
+            if (project_dir / mw_path).exists():
+                result.add_info(f"Auth middleware: {mw_path}")
+                break
+        else:
+            msg = "Auth mentioned in design but no middleware.ts found"
+            if strict:
+                result.add_error(msg)
+            else:
+                result.add_info(msg)
+
+    return result
 
 
 def _validate_design(project_dir: Path) -> ValidationResult:
@@ -156,12 +353,29 @@ def _validate_review(project_dir: Path) -> ValidationResult:
     content = review_file.read_text()
     content_lower = content.lower()
 
+    # Try front-matter first (v9.0)
+    fm = _parse_frontmatter(content)
+    if fm and "verdict" in fm:
+        verdict = str(fm["verdict"]).lower()
+        if verdict == "approved":
+            result.extracted["approved"] = True
+            result.add_info("Design APPROVED (front-matter)")
+        elif verdict in ("needs_revision", "needs revision"):
+            result.extracted["approved"] = False
+            result.extracted["feedback"] = content
+            result.add_info("Design NEEDS REVISION (front-matter)")
+        else:
+            result.extracted["approved"] = False
+            result.extracted["verdict_uncertain"] = True
+            result.add_info(f"Unknown verdict in front-matter: {verdict}")
+        return result
+
+    # Fallback: keyword search
     if "approved" in content_lower:
         result.extracted["approved"] = True
         result.add_info("Design APPROVED")
     elif "needs_revision" in content_lower or "needs revision" in content_lower:
         result.extracted["approved"] = False
-        # Extract feedback
         result.extracted["feedback"] = content
         result.add_info("Design NEEDS REVISION")
     else:
@@ -210,6 +424,14 @@ def _validate_build(project_dir: Path) -> ValidationResult:
         if (project_dir / pf).exists():
             result.add_info(f"Package file: {pf}")
 
+    # Post-build functional check: verify expected routes exist (v9.0)
+    route_result = validate_build_routes(project_dir, strict=False)
+    if route_result.extracted.get("missing_routes"):
+        missing = route_result.extracted["missing_routes"]
+        result.extracted["missing_routes"] = missing
+        for route in missing:
+            result.add_info(f"Missing route: {route}")
+
     return result
 
 
@@ -225,6 +447,30 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
     content = audit_file.read_text()
     content_lower = content.lower()
 
+    # Try front-matter first (v9.0)
+    fm = _parse_frontmatter(content)
+    if fm:
+        if "requirements_met" in fm and isinstance(fm["requirements_met"], int):
+            result.extracted["requirements_met"] = fm["requirements_met"]
+            total = fm.get("requirements_total")
+            if isinstance(total, int):
+                result.extracted["requirements_total"] = total
+            result.add_info(f"Spec coverage (front-matter): {fm['requirements_met']}/{total or '?'}")
+        if "discrepancies" in fm and isinstance(fm["discrepancies"], int):
+            result.extracted["discrepancies"] = fm["discrepancies"]
+            result.add_info(f"Discrepancies (front-matter): {fm['discrepancies']}")
+        status = str(fm.get("status", "")).lower()
+        if status == "needs_fix":
+            result.extracted["passed"] = False
+            result.add_info("Audit status: NEEDS_FIX (front-matter)")
+        elif status == "pass":
+            result.extracted["passed"] = True
+        elif status == "fail":
+            result.extracted["passed"] = False
+            result.add_info("Audit found issues (front-matter)")
+        return result
+
+    # Fallback: regex parsing
     # Extract requirement counts — primary format: "X/Y requirements met"
     match = re.search(r'(\d+)\s*/\s*(\d+)', content)
     if match:
@@ -264,6 +510,21 @@ def _validate_test(project_dir: Path) -> ValidationResult:
     content = test_file.read_text()
     content_lower = content.lower()
 
+    # Try front-matter first (v9.0)
+    fm = _parse_frontmatter(content)
+    if fm:
+        if "tests_passed" in fm and isinstance(fm["tests_passed"], int):
+            result.extracted["tests_passed"] = fm["tests_passed"]
+            if "tests_total" in fm and isinstance(fm["tests_total"], int):
+                result.extracted["tests_total"] = fm["tests_total"]
+            result.add_info(f"Tests (front-matter): {fm['tests_passed']}/{fm.get('tests_total', '?')}")
+        if "all_passed" in fm:
+            result.extracted["all_passed"] = bool(fm["all_passed"])
+            if not fm["all_passed"]:
+                result.add_error("Tests FAILED (front-matter)")
+        return result
+
+    # Fallback: regex parsing
     # Extract test counts — try multiple formats
     count_patterns = [
         # "8 / 10 passed" or "8/10 passing"
@@ -309,7 +570,33 @@ def _validate_deploy(project_dir: Path) -> ValidationResult:
         result.add_error(f"Deployment blocked: {content[:200]}")
         return result
 
-    # Look for deployment URL in various places
+    # v9.0: Check for placeholder/localhost DATABASE_URL in deployment files
+    deploy_md = project_dir / "DEPLOYMENT.md"
+    if deploy_md.exists():
+        deploy_content = deploy_md.read_text()
+        deploy_lower = deploy_content.lower()
+        placeholder_patterns = [
+            "placeholder", "localhost", "your_database_url",
+            "database_url_here", "postgres://user:password@localhost",
+        ]
+        for pattern in placeholder_patterns:
+            if pattern in deploy_lower and "database_url" in deploy_lower:
+                result.add_error(
+                    f"DATABASE_URL appears to be placeholder/localhost — app will be broken at runtime"
+                )
+                result.extracted["database_placeholder"] = True
+                break
+
+    # Try front-matter from DEPLOYMENT.md first (v9.0)
+    if deploy_md.exists():
+        fm = _parse_frontmatter(deploy_md.read_text())
+        if fm and fm.get("url"):
+            url = str(fm["url"])
+            result.extracted["url"] = url
+            result.add_info(f"Deployed to (front-matter): {url}")
+            return result
+
+    # Fallback: regex URL extraction
     url = None
 
     # Check deployer output files
@@ -366,6 +653,21 @@ def _validate_verify(project_dir: Path) -> ValidationResult:
     content = verify_file.read_text()
     content_lower = content.lower()
 
+    # Try front-matter first (v9.0)
+    fm = _parse_frontmatter(content)
+    if fm and "verified" in fm:
+        result.extracted["verified"] = bool(fm["verified"])
+        if "endpoints_tested" in fm and isinstance(fm["endpoints_tested"], int):
+            result.extracted["endpoints_tested"] = fm["endpoints_tested"]
+        if "endpoints_passed" in fm and isinstance(fm["endpoints_passed"], int):
+            result.extracted["endpoints_passed"] = fm["endpoints_passed"]
+        if fm["verified"]:
+            result.add_info("Verification PASSED (front-matter)")
+        else:
+            result.add_error("Verification FAILED (front-matter)")
+        return result
+
+    # Fallback: keyword search
     if "pass" in content_lower or "success" in content_lower:
         result.extracted["verified"] = True
         result.add_info("Verification PASSED")
