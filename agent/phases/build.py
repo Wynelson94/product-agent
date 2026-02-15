@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from ..state import Phase, AgentState
+from .. import config
 from . import PhaseConfig, register_phase
 
 
@@ -39,6 +40,7 @@ register_phase(PhaseConfig(
     ],
     max_turns=80,
     max_retries=4,  # Up to 5 total attempts (1 initial + 4 retries)
+    timeout_s=config.BUILD_PHASE_TIMEOUT_S,  # Build gets longer timeout (15 min)
     required_artifacts=[],  # Validated by _validate_build in validators.py
     build_prompt=_build_prompt,
 ))

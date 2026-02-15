@@ -4,6 +4,7 @@ Allows saving and restoring agent state for long-running builds.
 Includes verification phase tracking, spec audit, and enrichment state.
 """
 
+import hashlib
 import json
 from pathlib import Path
 from datetime import datetime
@@ -50,6 +51,7 @@ class CheckpointManager:
             "phase": phase_name,
             "timestamp": datetime.now().isoformat(),
             "state": state.to_dict(),
+            "artifact_hashes": self._compute_artifact_hashes(),
         }
 
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.json"
@@ -169,6 +171,21 @@ class CheckpointManager:
             path.unlink()
             count += 1
         return count
+
+    def _compute_artifact_hashes(self) -> dict[str, str]:
+        """Compute sha256 hashes of all .md artifacts in the project directory.
+
+        Returns:
+            Dict of filename → sha256 hex digest
+        """
+        hashes = {}
+        try:
+            for md_file in self.project_dir.glob("*.md"):
+                content = md_file.read_bytes()
+                hashes[md_file.name] = hashlib.sha256(content).hexdigest()
+        except Exception:
+            pass  # Never let hashing break checkpoint saving
+        return hashes
 
     def get_resume_prompt(self, state: AgentState) -> str:
         """Generate a prompt for resuming from a checkpoint.

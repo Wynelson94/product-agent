@@ -66,3 +66,7 @@ APPLE_TEAM_ID = get_env("APPLE_TEAM_ID")
 APPLE_DEVELOPER_EMAIL = get_env("APPLE_DEVELOPER_EMAIL")
 SWIFT_MIN_TESTS_PLUGIN = int(get_env("SWIFT_MIN_TESTS_PLUGIN", "8"))
 SWIFT_MIN_TESTS_HOST = int(get_env("SWIFT_MIN_TESTS_HOST", "15"))
+
+# v9.0: Phase timeouts (seconds)
+PHASE_TIMEOUT_S = int(get_env("PHASE_TIMEOUT_S", "600"))  # 10 min default
+BUILD_PHASE_TIMEOUT_S = int(get_env("BUILD_PHASE_TIMEOUT_S", "900"))  # 15 min for build

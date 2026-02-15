@@ -399,7 +399,8 @@ class TestValidateReview:
         )
         result = _validate_review(tmp_path)
         assert result.passed is True
-        assert result.extracted["approved"] is True
+        assert result.extracted["approved"] is False
+        assert result.extracted["verdict_uncertain"] is True
         assert any("unclear" in m for m in result.messages)
 
     def test_review_approved_case_insensitive(self, tmp_path):
@@ -552,7 +553,7 @@ class TestValidateAudit:
 
     def test_audit_file_missing(self, tmp_path):
         result = _validate_audit(tmp_path)
-        assert result.passed is True
+        assert result.passed is False
         assert any("not found" in m for m in result.messages)
 
     def test_audit_with_counts(self, tmp_path):
@@ -656,6 +657,20 @@ class TestValidateTest:
         result = _validate_test(tmp_path)
         assert result.passed is False
         assert result.extracted["all_passed"] is False
+
+    def test_test_of_format(self, tmp_path):
+        (tmp_path / "TEST_RESULTS.md").write_text("3 of 10 passed")
+        result = _validate_test(tmp_path)
+        assert result.extracted["tests_passed"] == 3
+        assert result.extracted["tests_total"] == 10
+
+    def test_test_passed_failed_total_format(self, tmp_path):
+        (tmp_path / "TEST_RESULTS.md").write_text(
+            "Passed: 8, Failed: 2, Total: 10"
+        )
+        result = _validate_test(tmp_path)
+        assert result.extracted["tests_passed"] == 8
+        assert result.extracted["tests_total"] == 10
 
     def test_test_no_counts_no_status(self, tmp_path):
         (tmp_path / "TEST_RESULTS.md").write_text("# Test Results\n\nTesting complete.")
@@ -787,8 +802,9 @@ class TestValidateVerify:
             "# Verification\n\nChecks are pending."
         )
         result = _validate_verify(tmp_path)
-        assert result.passed is True
-        assert "verified" not in result.extracted
+        assert result.passed is False
+        assert result.extracted["verified"] is False
+        assert any("inconclusive" in m for m in result.messages)
 
     def test_verification_pass_case_insensitive(self, tmp_path):
         (tmp_path / "VERIFICATION.md").write_text("PASS")

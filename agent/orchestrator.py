@@ -18,6 +18,7 @@ from .validators import validate_phase_output
 from .progress import ProgressReporter, PhaseResult
 from .phases import run_phase, get_phase_config
 from .cli_runner import PhaseCallResult
+from .quality import compute_quality_score
 from . import config
 
 
@@ -276,7 +277,7 @@ async def build_product(
             Phase.VERIFY, state, project_path, progress
         )
 
-        verified = verify_validation.extracted.get("verified", call.success)
+        verified = verify_validation.extracted.get("verified", False)
         state.deployment_verified = verified
         state.transition_to(Phase.VERIFY, "Passed" if verified else "Partial")
         checkpoint_mgr.save(state)
@@ -287,7 +288,8 @@ async def build_product(
         state.mark_completed(state.deployment_url)
 
         # Compute quality score
-        quality = _compute_quality(state)
+        quality_report = compute_quality_score(state)
+        quality = f"{quality_report.grade} ({quality_report.score}%)"
 
         result = BuildResult(
             success=True,
@@ -390,45 +392,3 @@ def _setup_enhancement_mode(
     )
 
 
-def _compute_quality(state: AgentState) -> str:
-    """Compute a quality grade based on build metrics."""
-    score = 100
-
-    # Deduct for build attempts (each retry costs 15 points)
-    if state.build_attempts > 1:
-        score -= (state.build_attempts - 1) * 15
-
-    # Deduct for design revisions (each revision costs 10 points)
-    if state.design_revision > 0:
-        score -= state.design_revision * 10
-
-    # Deduct if tests failed or weren't generated
-    if not state.tests_passed:
-        score -= 25
-    if not state.tests_generated:
-        score -= 15
-
-    # Deduct for audit discrepancies
-    if state.spec_audit_discrepancies > 0:
-        score -= min(state.spec_audit_discrepancies * 5, 20)
-
-    # Deduct if not verified
-    if not state.deployment_verified:
-        score -= 10
-
-    # Grade
-    score = max(0, min(100, score))
-    if score >= 95:
-        return f"A ({score}%)"
-    elif score >= 90:
-        return f"A- ({score}%)"
-    elif score >= 85:
-        return f"B+ ({score}%)"
-    elif score >= 80:
-        return f"B ({score}%)"
-    elif score >= 70:
-        return f"B- ({score}%)"
-    elif score >= 60:
-        return f"C ({score}%)"
-    else:
-        return f"F ({score}%)"

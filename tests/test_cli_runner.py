@@ -1,13 +1,15 @@
 """Tests for agent/cli_runner.py - Claude CLI subprocess runner."""
 
+import asyncio
 import json
 import os
 import subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.cli_runner import check_claude_cli, run_claude
+from agent.cli_runner import check_claude_cli, run_claude, run_phase_call, PhaseCallResult
 
 
 class TestRunClaudeSuccess:
@@ -191,3 +193,106 @@ class TestCheckClaudeCli:
         mock_run.side_effect = OSError("fail")
         available, info = check_claude_cli()
         assert available is False
+
+
+class TestRunPhaseCallTimeout:
+    """Tests for SDK phase call timeout behavior (v9.0)."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_failure(self):
+        """A phase that exceeds its timeout returns success=False."""
+        def slow_phase(*args, **kwargs):
+            time.sleep(5)
+            return PhaseCallResult(success=True, result_text="done")
+
+        with patch("agent.cli_runner._run_phase_in_thread", side_effect=slow_phase):
+            result = await run_phase_call(
+                prompt="test",
+                system_prompt="test",
+                allowed_tools=[],
+                cwd="/tmp",
+                timeout_s=1,
+            )
+
+        assert result.success is False
+        assert "timed out" in result.error
+        assert "1s" in result.error
+
+    @pytest.mark.asyncio
+    async def test_successful_call_within_timeout(self):
+        """A phase that finishes before timeout returns normally."""
+        expected = PhaseCallResult(
+            success=True, result_text="built", duration_s=0.5, num_turns=3
+        )
+
+        def fast_phase(*args, **kwargs):
+            return expected
+
+        with patch("agent.cli_runner._run_phase_in_thread", side_effect=fast_phase):
+            result = await run_phase_call(
+                prompt="test",
+                system_prompt="test",
+                allowed_tools=[],
+                cwd="/tmp",
+                timeout_s=10,
+            )
+
+        assert result.success is True
+        assert result.result_text == "built"
+        assert result.num_turns == 3
+
+    @pytest.mark.asyncio
+    async def test_default_timeout_from_config(self):
+        """When no timeout_s is given, uses config.PHASE_TIMEOUT_S."""
+        expected = PhaseCallResult(success=True, result_text="ok")
+
+        with patch("agent.cli_runner._run_phase_in_thread", return_value=expected):
+            with patch("agent.config.PHASE_TIMEOUT_S", 42):
+                # This should use 42s timeout from config, not hang
+                result = await run_phase_call(
+                    prompt="test",
+                    system_prompt="test",
+                    allowed_tools=[],
+                    cwd="/tmp",
+                )
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_explicit_timeout_overrides_config(self):
+        """Explicit timeout_s parameter overrides config default."""
+        def slow_phase(*args, **kwargs):
+            time.sleep(5)
+            return PhaseCallResult(success=True)
+
+        with patch("agent.cli_runner._run_phase_in_thread", side_effect=slow_phase):
+            with patch("agent.config.PHASE_TIMEOUT_S", 999):
+                # Explicit 1s should override the 999s config
+                result = await run_phase_call(
+                    prompt="test",
+                    system_prompt="test",
+                    allowed_tools=[],
+                    cwd="/tmp",
+                    timeout_s=1,
+                )
+
+        assert result.success is False
+        assert "1s" in result.error
+
+    @pytest.mark.asyncio
+    async def test_timeout_duration_set_correctly(self):
+        """Timeout result includes the correct duration_s."""
+        def slow_phase(*args, **kwargs):
+            time.sleep(5)
+            return PhaseCallResult(success=True)
+
+        with patch("agent.cli_runner._run_phase_in_thread", side_effect=slow_phase):
+            result = await run_phase_call(
+                prompt="test",
+                system_prompt="test",
+                allowed_tools=[],
+                cwd="/tmp",
+                timeout_s=1,
+            )
+
+        assert result.duration_s == 1.0

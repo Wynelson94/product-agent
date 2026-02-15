@@ -1,12 +1,13 @@
-"""Comprehensive tests for agent/orchestrator.py — the v8.0 orchestrator module.
+"""Comprehensive tests for agent/orchestrator.py — the v9.0 orchestrator module.
 
 Tests cover:
   - BuildConfig / BuildResult dataclass defaults
   - _get_phase_count logic (standard, enrich, enhancement)
   - _parse_stack_decision file parsing
   - _setup_enhancement_mode design copying and stack inference
-  - _compute_quality grading system
   - build_product happy path, failure modes, retries, loops, and edge cases
+
+Quality scoring is tested in test_quality.py (compute_quality_score).
 
 All async tests use pytest.mark.asyncio. External calls to run_phase are
 mocked so that tests never invoke Claude.
@@ -26,7 +27,6 @@ from agent.orchestrator import (
     _get_phase_count,
     _parse_stack_decision,
     _setup_enhancement_mode,
-    _compute_quality,
 )
 from agent.state import AgentState, Phase, ReviewStatus, create_initial_state
 from agent.validators import ValidationResult
@@ -453,135 +453,6 @@ class TestSetupEnhancementMode:
         _setup_enhancement_mode(state, cfg, project)
         content = (project / "STACK_DECISION.md").read_text()
         assert "dark-mode, search, notifications" in content
-
-
-# ---------------------------------------------------------------------------
-# 6. _compute_quality
-# ---------------------------------------------------------------------------
-
-
-class TestComputeQuality:
-    """Tests for _compute_quality grading."""
-
-    def _make_state(self, **overrides) -> AgentState:
-        """Create a perfect-build state, then apply overrides."""
-        state = create_initial_state("test", "/tmp/test")
-        state.build_attempts = 1
-        state.design_revision = 0
-        state.tests_passed = True
-        state.tests_generated = True
-        state.spec_audit_discrepancies = 0
-        state.deployment_verified = True
-        for k, v in overrides.items():
-            setattr(state, k, v)
-        return state
-
-    def test_perfect_build_is_a_100(self):
-        state = self._make_state()
-        assert _compute_quality(state) == "A (100%)"
-
-    def test_one_build_retry_deducts_15(self):
-        state = self._make_state(build_attempts=2)
-        assert _compute_quality(state) == "B+ (85%)"
-
-    def test_two_build_retries_deducts_30(self):
-        state = self._make_state(build_attempts=3)
-        assert _compute_quality(state) == "B- (70%)"
-
-    def test_one_design_revision_deducts_10(self):
-        state = self._make_state(design_revision=1)
-        assert _compute_quality(state) == "A- (90%)"
-
-    def test_two_design_revisions_deduct_20(self):
-        state = self._make_state(design_revision=2)
-        assert _compute_quality(state) == "B (80%)"
-
-    def test_tests_failed_deducts_25(self):
-        state = self._make_state(tests_passed=False)
-        assert _compute_quality(state) == "B- (75%)"
-
-    def test_tests_not_generated_deducts_15(self):
-        state = self._make_state(tests_generated=False)
-        assert _compute_quality(state) == "B+ (85%)"
-
-    def test_tests_failed_and_not_generated_deducts_40(self):
-        state = self._make_state(tests_passed=False, tests_generated=False)
-        assert _compute_quality(state) == "C (60%)"
-
-    def test_audit_discrepancies_deduct(self):
-        state = self._make_state(spec_audit_discrepancies=2)
-        # 2 * 5 = 10 points deducted -> 90%
-        assert _compute_quality(state) == "A- (90%)"
-
-    def test_audit_discrepancy_cap_at_20(self):
-        state = self._make_state(spec_audit_discrepancies=10)
-        # min(10 * 5, 20) = 20 points deducted -> 80%
-        assert _compute_quality(state) == "B (80%)"
-
-    def test_not_verified_deducts_10(self):
-        state = self._make_state(deployment_verified=False)
-        assert _compute_quality(state) == "A- (90%)"
-
-    def test_grade_boundary_a_is_95_plus(self):
-        # 95 -> A
-        state = self._make_state(spec_audit_discrepancies=1)
-        # 100 - 5 = 95
-        assert _compute_quality(state).startswith("A (95%)")
-
-    def test_grade_boundary_a_minus_is_90_to_94(self):
-        state = self._make_state(deployment_verified=False)
-        # 100 - 10 = 90
-        assert _compute_quality(state).startswith("A- (90%)")
-
-    def test_grade_boundary_b_plus_is_85_to_89(self):
-        state = self._make_state(build_attempts=2)
-        # 100 - 15 = 85
-        assert _compute_quality(state).startswith("B+ (85%)")
-
-    def test_grade_boundary_b_is_80_to_84(self):
-        state = self._make_state(design_revision=2)
-        # 100 - 20 = 80
-        assert _compute_quality(state).startswith("B (80%)")
-
-    def test_grade_boundary_b_minus_is_70_to_79(self):
-        state = self._make_state(build_attempts=3)
-        # 100 - 30 = 70
-        assert _compute_quality(state).startswith("B- (70%)")
-
-    def test_grade_boundary_c_is_60_to_69(self):
-        state = self._make_state(tests_passed=False, tests_generated=False)
-        # 100 - 25 - 15 = 60
-        assert _compute_quality(state).startswith("C (60%)")
-
-    def test_grade_boundary_f_below_60(self):
-        state = self._make_state(
-            build_attempts=3,
-            design_revision=2,
-            tests_passed=False,
-            tests_generated=False,
-            deployment_verified=False,
-        )
-        # 100 - 30 - 20 - 25 - 15 - 10 = 0
-        assert _compute_quality(state) == "F (0%)"
-
-    def test_score_clamped_to_zero(self):
-        """Score should not go below 0%."""
-        state = self._make_state(
-            build_attempts=5,
-            design_revision=2,
-            tests_passed=False,
-            tests_generated=False,
-            spec_audit_discrepancies=10,
-            deployment_verified=False,
-        )
-        quality = _compute_quality(state)
-        assert "0%" in quality
-        assert quality.startswith("F")
-
-    def test_combined_deductions(self):
-        state = self._make_state(build_attempts=2, design_revision=1, deployment_verified=False)
-        # 100 - 15 - 10 - 10 = 65
-        assert _compute_quality(state) == "C (65%)"
 
 
 # ---------------------------------------------------------------------------
@@ -1508,8 +1379,11 @@ class TestBuildProductVerify:
         result = await build_product("Todo app", tmp_path / "project")
 
         assert result.success is True
-        # Quality should be lower due to unverified deployment
-        assert "A (" not in result.quality  # Not top grade
+        # Unverified deployment → hard capped at grade C
+        assert result.quality is not None
+        assert "A (" not in result.quality
+        assert "A- (" not in result.quality
+        assert "B" not in result.quality
 
 
 # ---------------------------------------------------------------------------

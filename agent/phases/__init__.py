@@ -1,10 +1,14 @@
-"""Phase registry and runner for Product Agent v8.0.
+"""Phase registry and runner for Product Agent v9.0.
 
 Each phase is a focused Claude call with its own prompt, tools, validation,
 and retry strategy. Python controls the pipeline; Claude does the creative work.
+
+v9.0: Phase prompts and responses are logged to .agent_logs/ for debuggability.
 """
 
+import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -25,6 +29,7 @@ class PhaseConfig:
     max_turns: int = 30
     max_retries: int = 1
     model: str | None = None
+    timeout_s: int | None = None  # Per-phase timeout override (defaults to config.PHASE_TIMEOUT_S)
 
     # Called to build the task prompt for this phase
     build_prompt: Callable[[AgentState, Path], str] | None = None
@@ -110,7 +115,11 @@ Fix the issue and try a different approach. Do NOT repeat the same mistake.
         cwd=project_dir,
         max_turns=config.max_turns,
         model=config.model,
+        timeout_s=config.timeout_s,
     )
+
+    # Log prompt, system prompt, and response for debuggability
+    _log_phase_call(project_dir, phase, prompt, system_prompt, call_result)
 
     # Validate output
     validation = validate_phase_output(phase, project_dir)
@@ -147,6 +156,45 @@ Fix the issue and try a different approach. Do NOT repeat the same mistake.
     progress.phase_complete(phase_result)
 
     return call_result, validation
+
+
+def _log_phase_call(
+    project_dir: Path,
+    phase: Phase,
+    prompt: str,
+    system_prompt: str,
+    call_result: PhaseCallResult,
+) -> None:
+    """Write phase prompt/response logs for post-mortem debugging.
+
+    Writes to {project_dir}/.agent_logs/{phase}_{timestamp}.*.
+    Failures are silently ignored — logging must never break the build.
+    """
+    try:
+        log_dir = project_dir / ".agent_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"{phase.value}_{timestamp}"
+
+        (log_dir / f"{prefix}.prompt.md").write_text(prompt)
+        (log_dir / f"{prefix}.system.md").write_text(system_prompt)
+        (log_dir / f"{prefix}.response.md").write_text(call_result.result_text or "")
+
+        summary = {
+            "phase": phase.value,
+            "timestamp": datetime.now().isoformat(),
+            "success": call_result.success,
+            "num_turns": call_result.num_turns,
+            "cost_usd": call_result.cost_usd,
+            "duration_s": call_result.duration_s,
+            "error": call_result.error or None,
+        }
+        (log_dir / f"{prefix}.summary.json").write_text(
+            json.dumps(summary, indent=2)
+        )
+    except Exception:
+        pass  # Never let logging break the build
 
 
 # Import all phase modules to trigger registration

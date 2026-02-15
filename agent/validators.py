@@ -165,8 +165,9 @@ def _validate_review(project_dir: Path) -> ValidationResult:
         result.extracted["feedback"] = content
         result.add_info("Design NEEDS REVISION")
     else:
-        result.add_info("Review verdict unclear — treating as approved")
-        result.extracted["approved"] = True
+        result.add_info("Review verdict unclear — requires re-review")
+        result.extracted["approved"] = False
+        result.extracted["verdict_uncertain"] = True
 
     return result
 
@@ -218,7 +219,7 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
     audit_file = project_dir / "SPEC_AUDIT.md"
 
     if not audit_file.exists():
-        result.add_info("SPEC_AUDIT.md not found — audit may have been skipped")
+        result.add_error("SPEC_AUDIT.md not found — audit was not completed")
         return result
 
     content = audit_file.read_text()
@@ -263,15 +264,25 @@ def _validate_test(project_dir: Path) -> ValidationResult:
     content = test_file.read_text()
     content_lower = content.lower()
 
-    # Extract test counts
-    match = re.search(r'(\d+)\s*/\s*(\d+)\s*(passed|passing)', content_lower)
-    if match:
-        passed, total = int(match.group(1)), int(match.group(2))
-        result.extracted["tests_passed"] = passed
-        result.extracted["tests_total"] = total
-        result.add_info(f"Tests: {passed}/{total} passed")
+    # Extract test counts — try multiple formats
+    count_patterns = [
+        # "8 / 10 passed" or "8/10 passing"
+        (r'(\d+)\s*/\s*(\d+)\s*(passed|passing)', lambda m: (int(m.group(1)), int(m.group(2)))),
+        # "3 of 10 passed"
+        (r'(\d+)\s+of\s+(\d+)\s+(passed|passing)', lambda m: (int(m.group(1)), int(m.group(2)))),
+        # "Passed: 8, Failed: 2, Total: 10"
+        (r'passed:\s*(\d+).*total:\s*(\d+)', lambda m: (int(m.group(1)), int(m.group(2)))),
+    ]
+    for pattern, extractor in count_patterns:
+        match = re.search(pattern, content_lower)
+        if match:
+            passed, total = extractor(match)
+            result.extracted["tests_passed"] = passed
+            result.extracted["tests_total"] = total
+            result.add_info(f"Tests: {passed}/{total} passed")
+            break
     else:
-        # Try alternative format
+        # Try simple format: "12 tests passed"
         match = re.search(r'(\d+)\s+tests?\s+(passed|passing)', content_lower)
         if match:
             result.extracted["tests_passed"] = int(match.group(1))
@@ -361,5 +372,8 @@ def _validate_verify(project_dir: Path) -> ValidationResult:
     elif "fail" in content_lower:
         result.extracted["verified"] = False
         result.add_error("Verification FAILED")
+    else:
+        result.extracted["verified"] = False
+        result.add_error("Verification inconclusive — no pass/fail keywords found")
 
     return result

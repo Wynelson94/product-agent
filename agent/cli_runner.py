@@ -115,6 +115,7 @@ async def run_phase_call(
     cwd: str | Path,
     max_turns: int = 50,
     model: str | None = None,
+    timeout_s: int | None = None,
 ) -> PhaseCallResult:
     """Run a single phase using claude-code-sdk.
 
@@ -131,19 +132,34 @@ async def run_phase_call(
         cwd: Working directory (project directory)
         max_turns: Maximum turns for this phase
         model: Optional model override
+        timeout_s: Timeout in seconds (defaults to config.PHASE_TIMEOUT_S)
 
     Returns:
         PhaseCallResult with success status, output text, and metrics
     """
-    return await asyncio.to_thread(
-        _run_phase_in_thread,
-        prompt,
-        system_prompt,
-        allowed_tools,
-        str(cwd),
-        max_turns,
-        model,
-    )
+    from . import config as cfg
+
+    effective_timeout = timeout_s if timeout_s is not None else cfg.PHASE_TIMEOUT_S
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _run_phase_in_thread,
+                prompt,
+                system_prompt,
+                allowed_tools,
+                str(cwd),
+                max_turns,
+                model,
+            ),
+            timeout=effective_timeout,
+        )
+    except asyncio.TimeoutError:
+        return PhaseCallResult(
+            success=False,
+            error=f"Phase timed out after {effective_timeout}s",
+            duration_s=float(effective_timeout),
+        )
 
 
 # ---------------------------------------------------------------------------

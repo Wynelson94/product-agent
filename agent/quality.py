@@ -1,7 +1,9 @@
-"""Quality scoring for Product Agent v8.0.
+"""Quality scoring for Product Agent v9.0.
 
-Computes a confidence score after all phases complete. Factors in
-test results, spec coverage, build attempts, and design revisions.
+Computes a confidence score after all phases complete. Prioritizes
+product outcomes (does it work?) over process metrics (how many retries?).
+
+Hard caps ensure broken deployments and untested builds cannot score highly.
 """
 
 from dataclasses import dataclass
@@ -26,21 +28,35 @@ def compute_quality_score(
 ) -> QualityReport:
     """Compute a quality score from build metrics.
 
-    Factors:
-    - Test pass rate (30 points max)
-    - Spec coverage (20 points max)
-    - Build efficiency (20 points max) — fewer attempts = better
-    - Design quality (15 points max) — fewer revisions = better
-    - Verification (15 points max)
+    v9.0 weights — product outcomes prioritized over process metrics:
+    - Verification (35 points max) — deployed app actually works
+    - Test pass rate (25 points max) — tests exist AND pass
+    - Spec coverage (20 points max) — 0 when audit skipped
+    - Build efficiency (10 points max) — fewer attempts = better
+    - Design quality (10 points max) — fewer revisions = better
+
+    Hard caps:
+    - deployment_verified=False → max grade C (score capped at 69)
+    - tests_generated=False → max grade B- (score capped at 79)
     """
     factors: dict[str, int] = {}
     notes: list[str] = []
 
-    # Test pass rate (30 points)
+    # Verification (35 points) — most important: does the app work?
+    if state.deployment_verified:
+        factors["verification"] = 35
+    elif state.deployment_url:
+        factors["verification"] = 15
+        notes.append("Deployed but not fully verified")
+    else:
+        factors["verification"] = 5
+        notes.append("No deployment verification")
+
+    # Test pass rate (25 points)
     if state.tests_generated and state.tests_passed:
-        factors["tests"] = 30
+        factors["tests"] = 25
     elif state.tests_generated:
-        factors["tests"] = 10
+        factors["tests"] = 8
         notes.append("Tests generated but some failed")
     else:
         factors["tests"] = 0
@@ -57,44 +73,46 @@ def compute_quality_score(
             factors["spec_coverage"] = 5
             notes.append(f"{state.spec_audit_discrepancies} spec discrepancies — needs attention")
     else:
-        factors["spec_coverage"] = 10  # Neutral if not audited
+        factors["spec_coverage"] = 0
         notes.append("Spec audit not completed")
 
-    # Build efficiency (20 points)
+    # Build efficiency (10 points)
     if state.build_attempts <= 1:
-        factors["build_efficiency"] = 20
+        factors["build_efficiency"] = 10
     elif state.build_attempts == 2:
-        factors["build_efficiency"] = 15
+        factors["build_efficiency"] = 7
         notes.append("Build needed 1 retry")
     elif state.build_attempts == 3:
-        factors["build_efficiency"] = 10
+        factors["build_efficiency"] = 4
         notes.append("Build needed 2 retries")
     else:
-        factors["build_efficiency"] = 5
+        factors["build_efficiency"] = 2
         notes.append(f"Build needed {state.build_attempts - 1} retries")
 
-    # Design quality (15 points)
+    # Design quality (10 points)
     if state.design_revision == 0:
-        factors["design_quality"] = 15
-    elif state.design_revision == 1:
         factors["design_quality"] = 10
+    elif state.design_revision == 1:
+        factors["design_quality"] = 7
         notes.append("Design required 1 revision")
     else:
-        factors["design_quality"] = 5
+        factors["design_quality"] = 3
         notes.append(f"Design required {state.design_revision} revisions")
-
-    # Verification (15 points)
-    if state.deployment_verified:
-        factors["verification"] = 15
-    elif state.deployment_url:
-        factors["verification"] = 8
-        notes.append("Deployed but not fully verified")
-    else:
-        factors["verification"] = 5
-        notes.append("No deployment verification")
 
     # Compute total
     total = sum(factors.values())
+
+    # Apply hard caps — broken deployments and untested builds cannot score highly
+    if not state.deployment_verified:
+        if total > 69:
+            total = 69
+            notes.append("Score capped: deployment not verified (max grade C)")
+
+    if not state.tests_generated:
+        if total > 79:
+            total = 79
+            notes.append("Score capped: no tests generated (max grade B-)")
+
     total = max(0, min(100, total))
 
     # Grade
@@ -130,19 +148,19 @@ def format_quality_report(report: QualityReport) -> str:
     ]
 
     labels = {
+        "verification": "Verification",
         "tests": "Tests",
         "spec_coverage": "Spec Coverage",
         "build_efficiency": "Build Efficiency",
         "design_quality": "Design Quality",
-        "verification": "Verification",
     }
 
     max_points = {
-        "tests": 30,
+        "verification": 35,
+        "tests": 25,
         "spec_coverage": 20,
-        "build_efficiency": 20,
-        "design_quality": 15,
-        "verification": 15,
+        "build_efficiency": 10,
+        "design_quality": 10,
     }
 
     for key, label in labels.items():
