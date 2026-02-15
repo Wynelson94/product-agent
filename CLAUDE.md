@@ -17,6 +17,7 @@ Read this before making any changes.
 8. **New files need tests.** When adding a new module, add corresponding tests in `tests/`.
 9. **Don't break the build.** If tests fail after your change, fix them before moving on.
 10. **Use the existing patterns.** Check how similar things are done elsewhere in the codebase before inventing new approaches.
+11. **Only enhance, never remove.** Every change should make the agent better. Add, update, improve, and extend — but never delete capabilities or remove features. We only enhance and perfect the agent.
 
 ---
 
