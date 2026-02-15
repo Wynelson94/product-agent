@@ -90,11 +90,12 @@ class BuildHistory:
         scored: list[tuple[float, BuildRecord]] = []
         for record in all_builds:
             record_words = set(record.idea.lower().split())
-            # Jaccard similarity
+            # Jaccard similarity: |intersection| / |union|. Ranges 0.0 (no overlap)
+            # to 1.0 (identical). Simple but effective for short product descriptions.
             intersection = idea_words & record_words
             union = idea_words | record_words
             score = len(intersection) / len(union) if union else 0
-            if score > 0.1:  # Minimum threshold
+            if score > 0.1:  # Below 10% similarity = not meaningfully related
                 scored.append((score, record))
 
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -136,10 +137,14 @@ class BuildHistory:
             union = idea_words | record_words
             score = len(intersection) / len(union) if union else 0
 
-            # Boost score for same stack
+            # Boost same-stack matches by 0.3 so stack-specific lessons rank higher.
+            # This means a low-similarity build (0.05) on the same stack (0.05+0.3=0.35)
+            # will rank above a moderate-similarity build (0.2) on a different stack.
             if stack and record.stack == stack:
                 score += 0.3
 
+            # Re-check threshold after stack boost — a same-stack build with low
+            # idea similarity may now exceed 0.1 and be included.
             if score < 0.1:
                 continue
 

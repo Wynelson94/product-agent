@@ -243,9 +243,14 @@ def check_stack_deployment_compatibility(
 
     target_type = DEPLOYMENT_TYPES.get(deployment_target.lower(), "unknown")
 
-    # Check database compatibility with stack
+    # Two-stage compatibility check:
+    # Stage 1: Check if the database is explicitly incompatible with THIS stack
+    #          (e.g., sqlite is incompatible with nextjs-supabase's serverless deployment)
+    # Stage 2: Check if the database works with the deployment TYPE in general
+    #          (e.g., sqlite doesn't work with any "serverless" deployment type)
     if database_type:
         db_lower = database_type.lower()
+        # Stage 1: Stack-specific incompatibility
         if db_lower in stack.incompatible_databases:
             return False, (
                 f"Database '{database_type}' is incompatible with {stack.deployment} deployment. "
@@ -254,7 +259,7 @@ def check_stack_deployment_compatibility(
                 f"Use PostgreSQL with a managed service like Supabase, Neon, or Vercel Postgres instead."
             )
 
-        # Check database compatibility with deployment type
+        # Stage 2: Deployment type compatibility (general, not stack-specific)
         compatible_types = DATABASE_DEPLOYMENT_COMPATIBILITY.get(db_lower, [])
         if target_type not in compatible_types and compatible_types:
             return False, (

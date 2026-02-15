@@ -86,22 +86,25 @@ def score_stack(stack: StackDefinition, characteristics: dict) -> int:
     """Score a stack based on how well it matches the product characteristics."""
     score = 0
 
-    # Product type matching (most important)
+    # Product type matching (most important — up to 30 pts per match)
     for product_type in characteristics["product_types"]:
         if product_type in PRODUCT_TYPE_STACKS:
             recommended = PRODUCT_TYPE_STACKS[product_type]
             if stack.id in recommended:
-                # Higher score for being first recommendation
+                # Score by position in recommendation list:
+                # 1st choice = 30 pts, 2nd = 20 pts, 3rd = 10 pts.
+                # First recommendation is strongly preferred.
                 position = recommended.index(stack.id)
                 score += 30 - (position * 10)
 
-    # Feature matching
+    # Feature matching — 15 pts per matched feature (e.g., "realtime", "offline_first")
     for feature in characteristics["features"]:
         if feature in FEATURE_REQUIREMENTS:
             if stack.id in FEATURE_REQUIREMENTS[feature]:
                 score += 15
 
-    # Default stack bonus (tie-breaker)
+    # Default stack gets a small bonus as a tie-breaker when scores are close.
+    # This ensures nextjs-supabase wins when no strong signal points elsewhere.
     if stack.is_default:
         score += 5
 

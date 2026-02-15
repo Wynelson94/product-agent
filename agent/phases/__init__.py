@@ -194,10 +194,14 @@ def _log_phase_call(
             json.dumps(summary, indent=2)
         )
     except Exception:
-        pass  # Never let logging break the build
+        # Logging is best-effort. If disk is full, permissions fail, etc.,
+        # we still want the build to complete. Logs are for debugging, not correctness.
+        pass
 
 
-# Import all phase modules to trigger registration
+# Import all phase modules to trigger their register_phase() calls.
+# Each module (enrich.py, analyze.py, etc.) calls register_phase() at import time
+# to add its PhaseConfig to the _PHASE_CONFIGS registry.
 from . import (  # noqa: E402, F401
     enrich,
     analyze,

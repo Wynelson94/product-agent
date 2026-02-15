@@ -141,7 +141,7 @@ class CheckpointManager:
         if not phase_checkpoints:
             return None
 
-        # Sort by timestamp descending and get the latest
+        # Sort by timestamp (x[1]) descending — newest first — and take the top one
         phase_checkpoints.sort(key=lambda x: x[1], reverse=True)
         checkpoint_id, _, state_dict = phase_checkpoints[0]
 
@@ -190,8 +190,10 @@ class CheckpointManager:
         )
 
         if len(checkpoint_files) <= keep_latest:
-            return 0
+            return 0  # Already within limit, nothing to delete
 
+        # Slice: [:-keep_latest] = all files EXCEPT the newest `keep_latest` ones.
+        # Since files are sorted by mtime ascending, the newest are at the end.
         to_delete = checkpoint_files[:-keep_latest]
         for path in to_delete:
             path.unlink()
@@ -239,7 +241,7 @@ class CheckpointManager:
                 content = md_file.read_bytes()
                 hashes[md_file.name] = hashlib.sha256(content).hexdigest()
         except Exception:
-            pass  # Never let hashing break checkpoint saving
+            pass  # Hashing is best-effort — checkpoint saving must always succeed
         return hashes
 
     def get_resume_prompt(self, state: AgentState) -> str:
