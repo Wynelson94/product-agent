@@ -1,4 +1,4 @@
-# Product Agent v8.0
+# Product Agent v9.0
 
 An autonomous AI agent that builds, tests, and deploys web and native iOS applications from plain English descriptions.
 
@@ -10,7 +10,7 @@ product-agent "Build me a todo app with user authentication"
 
 **Output:**
 ```
-Product Agent v8.0 — Building: "Build me a todo app with user authentication"
+Product Agent v9.0 — Building: "Build me a todo app with user authentication"
 
 [1/9] Enriching prompt...                    done   12s
 [2/9] Analyzing stack... → nextjs-supabase   done    8s
@@ -31,21 +31,32 @@ BUILD COMPLETE  5m 42s
 
 One prompt in, production app out. No human intervention required.
 
-## What's New in v8.0
+## What's New in v9.0
 
-The core architectural change: **Python controls the pipeline, Claude does the creative work.**
+v9.0 is a reliability and correctness overhaul. After stress testing revealed a build could score **A (100%)** while producing a completely broken app, we systematically fixed 10 structural weaknesses across validators, quality scoring, observability, security, and prompts.
 
-- **Phase-by-Phase Orchestration** — Each of 9 phases is its own Claude SDK call. Python validates between phases, enforces ordering, and manages state. No more hoping a single 200-turn subprocess gets everything right.
-- **Smart Retry with Error Injection** — When a phase fails, the error context is injected into the retry prompt. The agent learns from its mistakes instead of repeating them.
-- **Parallel Audit + Test** — Spec audit and test execution run concurrently via `asyncio.gather`, saving 20-60 seconds per build.
-- **Build Memory** — Every build is logged to `.agent_history/builds.jsonl`. Before starting a new build, the agent finds similar past builds and learns from their patterns and mistakes.
-- **Quality Scoring** — 5-factor weighted scoring (tests, spec coverage, build efficiency, design quality, verification) produces A/B/C/F grades with detailed breakdowns.
-- **Real-Time Progress** — Phase-by-phase streaming output so you always know what's happening.
-- **Code-Level Validation** — Python checks that each phase produced its required artifacts before proceeding. No more "the LLM says it created the file."
-- **claude-code-sdk** — Uses the Python SDK instead of subprocess calls. Async, streaming, structured errors.
-- **Clean Public API** — `from agent.api import build` for programmatic use.
+### Tier 1: Honest Quality Metrics
+- **Validator Pass-Through Elimination** — Missing artifacts now fail validation instead of silently passing. No more auto-approving when SPEC_AUDIT.md doesn't exist.
+- **Outcome-Based Quality Scoring** — Scoring now weights functional verification (35pts), test pass rate (25pts), and spec coverage (20pts) over process metrics. A broken app with zero retries can no longer score A.
+- **SDK Prompt/Response Logging** — Every phase logs its prompt, system prompt, and response to `.agent_logs/` with cost and duration tracking. Every failure is debuggable without re-running.
+- **Phase Timeouts** — SDK calls now have per-phase timeouts (default 600s, build 900s) instead of hanging indefinitely.
+
+### Tier 2: Structural Contracts
+- **YAML Front-Matter Contracts** — Phase artifacts use `---\nkey: value\n---` as the primary parsing method. Regex is fallback only. When both fail, the phase fails explicitly.
+- **Post-Build Route Validation** — After build, expected routes from DESIGN.md are verified against actual `page.tsx` files. Missing routes are warnings on first attempt, errors on final retry.
+- **Deploy Database Safety** — If DATABASE_URL is empty/placeholder/localhost, deploy is blocked with DEPLOY_BLOCKED.md instead of deploying a broken app.
+- **Input Sanitization** — User idea text is sanitized before prompt injection: strips prompt injection markers, caps at 5000 chars, removes control characters.
+- **Tool Execution Limits** — Global turn limit (300) across all phases prevents infinite loops. Per-phase `max_turns` reduced for lightweight phases.
+
+### Tier 3: Architecture Improvements
+- **Per-Stack Builder Templates** — The 668-line monolithic BUILDER_PROMPT is now ~35 lines of universal principles + 5 per-stack `builder.md` templates loaded via the existing template system.
+- **Error Boundary & Loading Patterns** — Next.js pattern files now include error.tsx, loading.tsx (Suspense), empty states, and Zod form validation. Designer, reviewer, and auditor prompts enforce these.
+- **Checkpoint Lifecycle** — `cleanup(keep_latest=5)` deletes old checkpoints. `archive()` zips checkpoints + logs. Phase history capped at 50 entries.
+- **Failure Learning** — Build history records `failure_reasons` and `lessons`. Before new builds, `get_relevant_lessons()` finds similar past failures and injects lessons into builder prompts.
+- **Shell-Aware Safety Splitting** — Command splitting in safety hooks now uses `shlex` for quote validation, avoiding false splits inside quoted strings like `echo "safe ; rm -rf /"`.
 
 ### Previous Versions
+- **v8.0** — Phase-by-phase orchestration, build memory, quality scoring, parallel audit+test, public API
 - **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest integration
 - **v6.0** — Spec audit, prompt enrichment, original prompt passthrough, content site domain
 - **v5.0** — Deployment validation, verification, checkpoints, automated testing
@@ -93,7 +104,7 @@ product-agent --stack nextjs-prisma "Build a freelancer marketplace"
 
 ## How It Works
 
-### Architecture (v8.0)
+### Architecture
 
 ```
 User → build_product() →
@@ -170,7 +181,7 @@ product-agent --enrich-url "https://example-nonprofit.org" \
   "Rebuild this nonprofit website"
 ```
 
-### Programmatic API (v8.0)
+### Programmatic API
 
 ```python
 from agent.api import build, BuildConfig
@@ -232,7 +243,7 @@ product-agent --legacy "Build a simple todo app"
 product-agent --verbose "Build a blog"
 ```
 
-## Build Memory (v8.0)
+## Build Memory
 
 Every build is logged to `.agent_history/builds.jsonl`:
 
@@ -245,23 +256,27 @@ Every build is logged to `.agent_history/builds.jsonl`:
   "total_duration_s": 342,
   "test_count": 14,
   "tests_passed": 14,
-  "quality_grade": "A"
+  "quality_grade": "B+",
+  "failure_reasons": [],
+  "lessons": ["Always verify Supabase RLS policies with auth.uid()"]
 }
 ```
 
-Before starting a new build, the agent searches for similar past builds using Jaccard similarity and injects patterns from successful builds into the pipeline context.
+Before starting a new build, the agent searches for similar past builds using Jaccard similarity and injects patterns from successful builds into the pipeline context. In v9.0, `failure_reasons` and `lessons` are recorded per build, and `get_relevant_lessons()` finds relevant past failures (boosted by stack match) to inject into builder prompts — preventing the same mistakes from repeating.
 
-## Quality Scoring (v8.0)
+## Quality Scoring
 
-After all phases complete, a 5-factor quality score is computed:
+After all phases complete, a 5-factor quality score is computed. v9.0 rebalanced weights to prioritize **product outcomes** over process metrics:
 
 | Factor | Weight | What It Measures |
 |--------|--------|-----------------|
-| Tests | 30 pts | Were tests generated and did they pass? |
+| Functional Verification | 35 pts | Did deployed endpoints return expected results? |
+| Test Pass Rate | 25 pts | Were tests generated and did they pass? |
 | Spec Coverage | 20 pts | How many requirements were met in audit? |
-| Build Efficiency | 20 pts | How many build attempts were needed? |
-| Design Quality | 15 pts | How many design revisions were needed? |
-| Verification | 15 pts | Was the deployment verified working? |
+| Build Efficiency | 10 pts | How many build attempts were needed? |
+| Design Quality | 10 pts | How many design revisions were needed? |
+
+**Hard caps**: `deployment_verified=False` caps grade at C. `tests_generated=False` caps grade at B-.
 
 Grades: **A** (95+), **A-** (90+), **B+** (85+), **B** (80+), **B-** (70+), **C** (60+), **F** (<60)
 
@@ -272,19 +287,20 @@ Grades: **A** (95+), **A-** (90+), **B+** (85+), **B** (80+), **B-** (70+), **C*
 ```
 agent/
 ├── main.py                 # CLI entry point, v8/legacy routing
-├── orchestrator.py         # v8.0 — BuildConfig, BuildResult, build_product()
-├── api.py                  # v8.0 — Clean public API
-├── cli_runner.py           # SDK-based run_phase_call() + legacy run_claude()
-├── validators.py           # v8.0 — Code-level output validation
-├── progress.py             # v8.0 — Real-time progress streaming
-├── history.py              # v8.0 — Build memory (JSONL log)
-├── quality.py              # v8.0 — Quality scoring
+├── orchestrator.py         # BuildConfig, BuildResult, build_product()
+├── api.py                  # Clean public API
+├── cli_runner.py           # SDK-based run_phase_call() with timeouts
+├── validators.py           # Code-level output validation + YAML front-matter
+├── progress.py             # Real-time progress streaming
+├── history.py              # Build memory with failure learning
+├── quality.py              # Outcome-based quality scoring
+├── sanitize.py             # v9.0 — Input sanitization
 ├── config.py               # Environment configuration
 ├── state.py                # Phase and state management
-├── checkpoints.py          # Checkpoint system
+├── checkpoints.py          # Checkpoint system with cleanup/archive
 ├── recovery.py             # Error recovery
 ├── test_validation.py      # Test result parsing
-├── phases/                 # v8.0 — Phase modules
+├── phases/                 # Phase modules with SDK logging
 │   ├── __init__.py         # Phase registry, run_phase() dispatcher
 │   ├── enrich.py           # Enricher phase
 │   ├── analyze.py          # Stack analysis phase
@@ -296,7 +312,7 @@ agent/
 │   ├── deploy.py           # Deploy phase
 │   └── verify.py           # Verify phase
 ├── agents/
-│   └── definitions.py      # 10 subagent prompt definitions
+│   └── definitions.py      # 10 subagent prompts + per-stack template injection
 ├── stacks/
 │   ├── criteria.py         # Stack definitions and scoring
 │   ├── selector.py         # Stack selection logic
@@ -328,23 +344,24 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-1,239 tests across 17 test files:
+1,365 tests across 18 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|---------|
 | `test_orchestrator_v8.py` | 114 | Full v8 pipeline, retry, quality gate, parallel phases |
-| `test_validators.py` | 93 | All 9 phase validators, extraction helpers |
-| `test_swift_modes.py` | 85 | Swift state, criteria, prompts, domains |
-| `test_quality.py` | 77 | Scoring factors, grade boundaries, report formatting |
-| `test_phases.py` | ~70 | Phase registry, PhaseConfig, run_phase with mocked SDK |
-| `test_history.py` | 64 | BuildRecord, BuildHistory, similarity search |
-| `test_agent_prompts.py` | 60 | Registry, tools, all 10 agent prompts |
+| `test_validators.py` | 93+ | All 9 phase validators, YAML front-matter, extraction |
+| `test_swift_modes.py` | 100 | Swift state, criteria, prompts, domains |
+| `test_quality.py` | 77+ | Outcome-based scoring, grade caps, report formatting |
+| `test_safety.py` | 183 | Blocked commands, shell-aware splitting, path protection |
+| `test_phases.py` | 142 | Phase registry, PhaseConfig, run_phase, SDK logging |
+| `test_history.py` | 78 | BuildRecord, failure learning, similarity search |
+| `test_agent_prompts.py` | 74 | Registry, tools, all 10 agents, template injection |
 | `test_progress.py` | 55 | PhaseResult, ProgressReporter, formatting |
+| `test_checkpoints.py` | 44 | Save/load/resume, cleanup, archive, phase cap |
 | `test_stack_selection.py` | 44 | Keyword analysis, scoring, selection |
 | `test_orchestration.py` | 34 | Legacy orchestration, build modes, prompt content |
-| `test_checkpoints.py` | 30 | Save/load/resume, phase-specific |
-| `test_cli_runner.py` | 19 | Subprocess mocking, error handling |
-| + 5 more | ~494 | Recovery, safety, validation, state v5/v6 |
+| `test_sanitize.py` | 25 | Input sanitization, injection markers, edge cases |
+| + 5 more | ~200+ | Recovery, validation, state v5/v6, CLI runner |
 
 ### Domain Patterns
 
@@ -384,10 +401,12 @@ Options:
 ## Safety Features
 
 The agent includes safety hooks that:
-- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes)
+- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes) with shell-aware splitting that respects quoted strings
 - **Protect** system directories and credentials
 - **Auto-approve** safe operations (npm, git, file writes in project)
 - **Validate** deployment compatibility (SQLite + Vercel = blocked)
+- **Sanitize** user input before prompt injection (strips injection markers, caps length, removes control chars)
+- **Limit** total tool turns per build (300) and per phase to prevent infinite loops
 
 ## Version History
 
@@ -401,7 +420,8 @@ The agent includes safety hooks that:
 | v5.1 | Automated testing, tester agent, test templates |
 | v6.0 | Spec audit, prompt passthrough, enricher agent, content site domain |
 | v7.0 | Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest |
-| **v8.0** | **Phase-by-phase orchestration, build memory, quality scoring, 1239 tests, public API** |
+| **v9.0** | **Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning, 1365 tests** |
+| v8.0 | Phase-by-phase orchestration, build memory, quality scoring, public API |
 
 ## Requirements
 
