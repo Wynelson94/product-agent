@@ -1,4 +1,4 @@
-# Product Agent v9.0
+# Product Agent v10.0
 
 An autonomous AI agent that builds, tests, and deploys web and native iOS applications from plain English descriptions.
 
@@ -10,7 +10,7 @@ product-agent "Build me a todo app with user authentication"
 
 **Output:**
 ```
-Product Agent v9.0 — Building: "Build me a todo app with user authentication"
+Product Agent v10.0 — Building: "Build me a todo app with user authentication"
 
 [1/9] Enriching prompt...                    done   12s
 [2/9] Analyzing stack... → nextjs-supabase   done    8s
@@ -31,31 +31,24 @@ BUILD COMPLETE  5m 42s
 
 One prompt in, production app out. No human intervention required.
 
-## What's New in v9.0
+## What's New in v10.0
 
-v9.0 is a reliability and correctness overhaul. After stress testing revealed a build could score **A (100%)** while producing a completely broken app, we systematically fixed 10 structural weaknesses across validators, quality scoring, observability, security, and prompts.
+v10.0 is a post-mortem driven release. After the ClientPulse stress test (12-table multi-tenant SaaS) scored B- instead of A, we traced every preventable failure back to a gap in the agent's prompts, validators, or patterns — and fixed all 4.
 
-### Tier 1: Honest Quality Metrics
-- **Validator Pass-Through Elimination** — Missing artifacts now fail validation instead of silently passing. No more auto-approving when SPEC_AUDIT.md doesn't exist.
-- **Outcome-Based Quality Scoring** — Scoring now weights functional verification (35pts), test pass rate (25pts), and spec coverage (20pts) over process metrics. A broken app with zero retries can no longer score A.
-- **SDK Prompt/Response Logging** — Every phase logs its prompt, system prompt, and response to `.agent_logs/` with cost and duration tracking. Every failure is debuggable without re-running.
-- **Phase Timeouts** — SDK calls now have per-phase timeouts (default 600s, build 900s) instead of hanging indefinitely.
+### Post-Mortem Fixes (v10.0)
+- **Dependency Audit** — Builder and auditor now cross-check DESIGN.md against package.json. Missing libraries (e.g., `@react-pdf/renderer`) are flagged as CRITICAL discrepancies instead of silently crashing at runtime.
+- **Data Wiring Verification** — Auditor greps for `data={[]}` and mock data props. Builder prompt requires components to fetch real data from Supabase/API, not pass empty arrays.
+- **RLS Circular Dependency Prevention** — Designer prompt warns against self-referencing RLS policies. Reviewer checklist includes circular dep checks. Stack patterns include BAD/GOOD examples with SECURITY DEFINER fix. Recovery system detects the pattern and suggests the fix.
+- **Root Page Routing** — Scaffold template clarifies that route groups don't replace the root `page.tsx`. Verifier checks the homepage isn't the default Next.js template.
+- **CRITICAL Override** — When the auditor finds CRITICAL discrepancies but reports `status: PASS`, the validator now overrides to FAIL. Quality scoring penalizes 5 pts per CRITICAL finding and caps at grade B (84).
 
-### Tier 2: Structural Contracts
-- **YAML Front-Matter Contracts** — Phase artifacts use `---\nkey: value\n---` as the primary parsing method. Regex is fallback only. When both fail, the phase fails explicitly.
-- **Post-Build Route Validation** — After build, expected routes from DESIGN.md are verified against actual `page.tsx` files. Missing routes are warnings on first attempt, errors on final retry.
-- **Deploy Database Safety** — If DATABASE_URL is empty/placeholder/localhost, deploy is blocked with DEPLOY_BLOCKED.md instead of deploying a broken app.
-- **Input Sanitization** — User idea text is sanitized before prompt injection: strips prompt injection markers, caps at 5000 chars, removes control characters.
-- **Tool Execution Limits** — Global turn limit (300) across all phases prevents infinite loops. Per-phase `max_turns` reduced for lightweight phases.
-
-### Tier 3: Architecture Improvements
-- **Per-Stack Builder Templates** — The 668-line monolithic BUILDER_PROMPT is now ~35 lines of universal principles + 5 per-stack `builder.md` templates loaded via the existing template system.
-- **Error Boundary & Loading Patterns** — Next.js pattern files now include error.tsx, loading.tsx (Suspense), empty states, and Zod form validation. Designer, reviewer, and auditor prompts enforce these.
-- **Checkpoint Lifecycle** — `cleanup(keep_latest=5)` deletes old checkpoints. `archive()` zips checkpoints + logs. Phase history capped at 50 entries.
-- **Failure Learning** — Build history records `failure_reasons` and `lessons`. Before new builds, `get_relevant_lessons()` finds similar past failures and injects lessons into builder prompts.
-- **Shell-Aware Safety Splitting** — Command splitting in safety hooks now uses `shlex` for quote validation, avoiding false splits inside quoted strings like `echo "safe ; rm -rf /"`.
+### Crash Recovery (v9.1)
+- **`--resume` now works in v8+ mode** — Loads the latest checkpoint, verifies artifacts on disk, and skips completed phases. A crash at phase 7 no longer requires re-running phases 1-6.
+- **Atomic Checkpoint Writes** — Checkpoints use `tempfile` + `os.replace()` to prevent half-written state on crash.
+- **Artifact Verification** — On resume, stored SHA-256 hashes are compared against files on disk. Mismatched artifacts trigger a re-run of that phase.
 
 ### Previous Versions
+- **v9.0** — Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning
 - **v8.0** — Phase-by-phase orchestration, build memory, quality scoring, parallel audit+test, public API
 - **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest integration
 - **v6.0** — Spec audit, prompt enrichment, original prompt passthrough, content site domain
@@ -276,7 +269,7 @@ After all phases complete, a 5-factor quality score is computed. v9.0 rebalanced
 | Build Efficiency | 10 pts | How many build attempts were needed? |
 | Design Quality | 10 pts | How many design revisions were needed? |
 
-**Hard caps**: `deployment_verified=False` caps grade at C. `tests_generated=False` caps grade at B-.
+**Hard caps**: `deployment_verified=False` caps grade at C. `tests_generated=False` caps grade at B-. `spec_audit_critical_count > 0` caps grade at B (v10.0).
 
 Grades: **A** (95+), **A-** (90+), **B+** (85+), **B** (80+), **B-** (70+), **C** (60+), **F** (<60)
 
@@ -344,7 +337,7 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-1,365 tests across 18 test files:
+1,439 tests across 18 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|---------|
@@ -420,7 +413,9 @@ The agent includes safety hooks that:
 | v5.1 | Automated testing, tester agent, test templates |
 | v6.0 | Spec audit, prompt passthrough, enricher agent, content site domain |
 | v7.0 | Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest |
-| **v9.0** | **Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning, 1365 tests** |
+| **v10.0** | **Post-mortem fixes: dependency audit, data wiring verification, RLS circular dep prevention, CRITICAL override, quality scoring penalty, 1439 tests** |
+| v9.1 | Crash recovery: `--resume` in v8+ mode, atomic checkpoints, artifact verification |
+| v9.0 | Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning |
 | v8.0 | Phase-by-phase orchestration, build memory, quality scoring, public API |
 
 ## Requirements
