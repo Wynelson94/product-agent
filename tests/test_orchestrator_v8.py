@@ -27,6 +27,9 @@ from agent.orchestrator import (
     _get_phase_count,
     _parse_stack_decision,
     _setup_enhancement_mode,
+    _should_skip_phase,
+    _has_source_code,
+    _PHASE_ORDER,
 )
 from agent.state import AgentState, Phase, ReviewStatus, create_initial_state
 from agent.validators import ValidationResult
@@ -1565,3 +1568,375 @@ class TestBuildProductEdgeCases:
         # Progress reporter collects results; our mock won't populate these
         # but the result should at least have the list attribute
         assert isinstance(result.phase_results, list)
+
+
+# ---------------------------------------------------------------------------
+# 26. _should_skip_phase (v9.1)
+# ---------------------------------------------------------------------------
+
+
+class TestShouldSkipPhase:
+    """Tests for _should_skip_phase phase skip logic (v9.1 crash recovery)."""
+
+    def test_fresh_state_skips_nothing(self, tmp_path):
+        """INIT state should not skip any phase."""
+        state = create_initial_state("test", str(tmp_path))
+        for phase in [Phase.ANALYSIS, Phase.DESIGN, Phase.REVIEW, Phase.BUILD]:
+            assert _should_skip_phase(state, phase, tmp_path) is False
+
+    def test_analysis_done_skips_analysis(self, tmp_path):
+        """When state is past ANALYSIS and STACK_DECISION.md exists, skip it."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        state.stack_id = "nextjs-supabase"
+        (tmp_path / "STACK_DECISION.md").write_text("# Stack\n")
+
+        assert _should_skip_phase(state, Phase.ANALYSIS, tmp_path) is True
+
+    def test_analysis_not_skipped_if_artifact_missing(self, tmp_path):
+        """Even if state says past analysis, don't skip if STACK_DECISION.md is missing."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        state.stack_id = "nextjs-supabase"
+        # No STACK_DECISION.md
+
+        assert _should_skip_phase(state, Phase.ANALYSIS, tmp_path) is False
+
+    def test_design_skipped_when_file_exists(self, tmp_path):
+        """DESIGN phase is skipped when DESIGN.md exists and state is past it."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        (tmp_path / "DESIGN.md").write_text("# Design\n")
+
+        assert _should_skip_phase(state, Phase.DESIGN, tmp_path) is True
+
+    def test_review_skipped_when_design_exists(self, tmp_path):
+        """REVIEW phase is skipped when DESIGN.md exists and state is past REVIEW."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        (tmp_path / "DESIGN.md").write_text("# Design\n")
+
+        assert _should_skip_phase(state, Phase.REVIEW, tmp_path) is True
+
+    def test_build_done_skips_build(self, tmp_path):
+        """When state is past BUILD and source code exists, skip it."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.DEPLOY
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "index.tsx").write_text("export default function App() {}")
+
+        assert _should_skip_phase(state, Phase.BUILD, tmp_path) is True
+
+    def test_build_not_skipped_if_no_source(self, tmp_path):
+        """When state is past BUILD but no source code exists, re-run BUILD."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.DEPLOY
+
+        assert _should_skip_phase(state, Phase.BUILD, tmp_path) is False
+
+    def test_future_phase_never_skipped(self, tmp_path):
+        """Phases after the checkpoint phase should never be skipped."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.REVIEW
+
+        assert _should_skip_phase(state, Phase.BUILD, tmp_path) is False
+        assert _should_skip_phase(state, Phase.DEPLOY, tmp_path) is False
+
+    def test_failed_state_checks_artifacts(self, tmp_path):
+        """FAILED state should check artifacts to determine skip status."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.FAILED
+        state.stack_id = "nextjs-supabase"
+        (tmp_path / "STACK_DECISION.md").write_text("# Stack\n")
+
+        assert _should_skip_phase(state, Phase.ANALYSIS, tmp_path) is True
+
+    def test_failed_state_no_artifacts_skips_nothing(self, tmp_path):
+        """FAILED state with no artifacts should not skip any phase."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.FAILED
+
+        assert _should_skip_phase(state, Phase.ANALYSIS, tmp_path) is False
+        assert _should_skip_phase(state, Phase.BUILD, tmp_path) is False
+
+    def test_audit_skipped_when_completed(self, tmp_path):
+        """AUDIT is skipped when spec_audit_completed and SPEC_AUDIT.md exists."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.DEPLOY
+        state.spec_audit_completed = True
+        (tmp_path / "SPEC_AUDIT.md").write_text("# Audit\n")
+
+        assert _should_skip_phase(state, Phase.AUDIT, tmp_path) is True
+
+    def test_audit_not_skipped_without_file(self, tmp_path):
+        """AUDIT is not skipped when spec_audit_completed but no SPEC_AUDIT.md."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.DEPLOY
+        state.spec_audit_completed = True
+
+        assert _should_skip_phase(state, Phase.AUDIT, tmp_path) is False
+
+    def test_test_skipped_when_completed(self, tmp_path):
+        """TEST is skipped when tests_generated and TEST_RESULTS.md exists."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.DEPLOY
+        state.tests_generated = True
+        (tmp_path / "TEST_RESULTS.md").write_text("# Tests\n")
+
+        assert _should_skip_phase(state, Phase.TEST, tmp_path) is True
+
+    def test_deploy_skipped_when_url_set(self, tmp_path):
+        """DEPLOY is skipped when deployment_url is set."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.VERIFY
+        state.deployment_url = "https://app.vercel.app"
+
+        assert _should_skip_phase(state, Phase.DEPLOY, tmp_path) is True
+
+    def test_deploy_skipped_when_blocked(self, tmp_path):
+        """DEPLOY is skipped when DEPLOY_BLOCKED.md exists."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.VERIFY
+        (tmp_path / "DEPLOY_BLOCKED.md").write_text("Blocked\n")
+
+        assert _should_skip_phase(state, Phase.DEPLOY, tmp_path) is True
+
+    def test_verify_skipped_when_file_exists(self, tmp_path):
+        """VERIFY is skipped when VERIFICATION.md exists."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.COMPLETE
+        (tmp_path / "VERIFICATION.md").write_text("# Verification\n")
+
+        assert _should_skip_phase(state, Phase.VERIFY, tmp_path) is True
+
+    def test_enrich_skipped_when_enriched(self, tmp_path):
+        """ENRICH is skipped when prompt_enriched is True."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        state.prompt_enriched = True
+
+        assert _should_skip_phase(state, Phase.ENRICH, tmp_path) is True
+
+    def test_enrich_not_skipped_when_not_enriched(self, tmp_path):
+        """ENRICH is not skipped when prompt_enriched is False."""
+        state = create_initial_state("test", str(tmp_path))
+        state.phase = Phase.BUILD
+        state.prompt_enriched = False
+
+        assert _should_skip_phase(state, Phase.ENRICH, tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# 27. _has_source_code (v9.1)
+# ---------------------------------------------------------------------------
+
+
+class TestHasSourceCode:
+    """Tests for _has_source_code helper (v9.1)."""
+
+    def test_no_source_dirs(self, tmp_path):
+        """Returns False when no source directories exist."""
+        assert _has_source_code(tmp_path) is False
+
+    def test_src_dir_with_files(self, tmp_path):
+        """Returns True when src/ contains files."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "index.ts").write_text("// code")
+        assert _has_source_code(tmp_path) is True
+
+    def test_sources_dir_for_swift(self, tmp_path):
+        """Returns True when Sources/ contains files (Swift projects)."""
+        sources = tmp_path / "Sources"
+        sources.mkdir()
+        (sources / "main.swift").write_text("// code")
+        assert _has_source_code(tmp_path) is True
+
+    def test_empty_src_dir(self, tmp_path):
+        """Returns False when src/ exists but is empty."""
+        (tmp_path / "src").mkdir()
+        assert _has_source_code(tmp_path) is False
+
+    def test_app_dir(self, tmp_path):
+        """Returns True when app/ contains files."""
+        app = tmp_path / "app"
+        app.mkdir()
+        (app / "page.tsx").write_text("// code")
+        assert _has_source_code(tmp_path) is True
+
+    def test_lib_dir(self, tmp_path):
+        """Returns True when lib/ contains files."""
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        (lib / "utils.py").write_text("# code")
+        assert _has_source_code(tmp_path) is True
+
+    def test_nested_files_detected(self, tmp_path):
+        """Returns True when files are in subdirectories of src/."""
+        deep = tmp_path / "src" / "components" / "ui"
+        deep.mkdir(parents=True)
+        (deep / "Button.tsx").write_text("// button")
+        assert _has_source_code(tmp_path) is True
+
+
+# ---------------------------------------------------------------------------
+# 28. _PHASE_ORDER (v9.1)
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseOrder:
+    """Tests for the _PHASE_ORDER mapping (v9.1)."""
+
+    def test_init_is_lowest(self):
+        """INIT should have the lowest positive order."""
+        assert _PHASE_ORDER[Phase.INIT] == 0
+
+    def test_failed_is_negative(self):
+        """FAILED should have negative order for artifact-based resume."""
+        assert _PHASE_ORDER[Phase.FAILED] < 0
+
+    def test_audit_and_test_same_order(self):
+        """AUDIT and TEST should have the same order (they run in parallel)."""
+        assert _PHASE_ORDER[Phase.AUDIT] == _PHASE_ORDER[Phase.TEST]
+
+    def test_pipeline_ordering(self):
+        """Phases should be ordered correctly in the pipeline."""
+        assert _PHASE_ORDER[Phase.ANALYSIS] < _PHASE_ORDER[Phase.DESIGN]
+        assert _PHASE_ORDER[Phase.DESIGN] < _PHASE_ORDER[Phase.REVIEW]
+        assert _PHASE_ORDER[Phase.REVIEW] < _PHASE_ORDER[Phase.BUILD]
+        assert _PHASE_ORDER[Phase.BUILD] < _PHASE_ORDER[Phase.AUDIT]
+        assert _PHASE_ORDER[Phase.AUDIT] < _PHASE_ORDER[Phase.DEPLOY]
+        assert _PHASE_ORDER[Phase.DEPLOY] < _PHASE_ORDER[Phase.VERIFY]
+
+    def test_complete_is_highest(self):
+        """COMPLETE should have the highest order."""
+        assert _PHASE_ORDER[Phase.COMPLETE] > _PHASE_ORDER[Phase.VERIFY]
+
+
+# ---------------------------------------------------------------------------
+# 29. BuildConfig resume fields (v9.1)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildConfigResumeFields:
+    """Tests for the resume fields added to BuildConfig (v9.1)."""
+
+    def test_resume_defaults_to_false(self):
+        """resume should default to False."""
+        cfg = BuildConfig()
+        assert cfg.resume is False
+
+    def test_resume_from_defaults_to_none(self):
+        """resume_from should default to None."""
+        cfg = BuildConfig()
+        assert cfg.resume_from is None
+
+    def test_resume_can_be_set(self):
+        """resume flag can be explicitly set."""
+        cfg = BuildConfig(resume=True, resume_from="build_20260215_120000")
+        assert cfg.resume is True
+        assert cfg.resume_from == "build_20260215_120000"
+
+
+# ---------------------------------------------------------------------------
+# 30. build_product — resume (v9.1)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildProductResume:
+    """Tests for build_product with resume=True (v9.1 crash recovery)."""
+
+    @pytest.mark.asyncio
+    @patch("agent.orchestrator.validate_phase_output")
+    @patch("agent.orchestrator.run_phase")
+    async def test_resume_skips_completed_phases(self, mock_run_phase, mock_validate, tmp_path):
+        """Resume should skip phases that have completed artifacts."""
+        project = tmp_path / "project"
+        project.mkdir(parents=True)
+
+        # Set up artifacts as if analysis, design, review, build completed
+        (project / "ORIGINAL_PROMPT.md").write_text("# Original\n\nResume test\n")
+        (project / "STACK_DECISION.md").write_text("# Stack\n- **Stack ID**: nextjs-supabase\n")
+        (project / "DESIGN.md").write_text("# Design\n")
+        src = project / "src"
+        src.mkdir()
+        (src / "index.tsx").write_text("export default function App() {}")
+
+        # Create a checkpoint at BUILD phase
+        from agent.checkpoints import CheckpointManager
+        mgr = CheckpointManager(str(project))
+        state = create_initial_state("Resume test", str(project))
+        state.phase = Phase.BUILD
+        state.stack_id = "nextjs-supabase"
+        state.build_attempts = 1
+        mgr.save(state)
+
+        call_log = []
+        mock_run_phase.side_effect = _make_run_phase_mock(call_log=call_log).side_effect
+        mock_validate.return_value = make_validation(passed=True, phase=Phase.BUILD)
+
+        cfg = BuildConfig(resume=True)
+        result = await build_product("Resume test", project, build_config=cfg)
+
+        phases_called = [entry[0] for entry in call_log]
+        # Should NOT call analysis, design, review, or build
+        assert Phase.ANALYSIS not in phases_called
+        assert Phase.DESIGN not in phases_called
+        assert Phase.REVIEW not in phases_called
+        assert Phase.BUILD not in phases_called
+        # Should call audit, test, deploy, verify
+        assert Phase.AUDIT in phases_called
+        assert Phase.TEST in phases_called
+
+    @pytest.mark.asyncio
+    @patch("agent.orchestrator.validate_phase_output")
+    @patch("agent.orchestrator.run_phase")
+    async def test_resume_no_checkpoint_falls_back_to_fresh(self, mock_run_phase, mock_validate, tmp_path):
+        """Resume without a checkpoint should fall back to fresh build."""
+        project = tmp_path / "project"
+
+        call_log = []
+        mock_run_phase.side_effect = _make_run_phase_mock(call_log=call_log).side_effect
+        mock_validate.return_value = make_validation(passed=True, phase=Phase.BUILD)
+
+        cfg = BuildConfig(resume=True)
+        result = await build_product("Fresh build", project, build_config=cfg)
+
+        phases_called = [entry[0] for entry in call_log]
+        # Should run all phases since no checkpoint exists
+        assert Phase.ANALYSIS in phases_called
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    @patch("agent.orchestrator.validate_phase_output")
+    @patch("agent.orchestrator.run_phase")
+    async def test_resume_reruns_phase_when_artifact_missing(self, mock_run_phase, mock_validate, tmp_path):
+        """Resume should re-run a phase whose artifact was deleted."""
+        project = tmp_path / "project"
+        project.mkdir(parents=True)
+
+        (project / "ORIGINAL_PROMPT.md").write_text("# Original\n\nTest\n")
+        # Create checkpoint at REVIEW but DON'T create DESIGN.md
+        (project / "STACK_DECISION.md").write_text("# Stack\n")
+        # No DESIGN.md — design should be re-run
+
+        from agent.checkpoints import CheckpointManager
+        mgr = CheckpointManager(str(project))
+        state = create_initial_state("Artifact test", str(project))
+        state.phase = Phase.REVIEW
+        state.stack_id = "nextjs-supabase"
+        mgr.save(state)
+
+        call_log = []
+        mock_run_phase.side_effect = _make_run_phase_mock(call_log=call_log).side_effect
+        mock_validate.return_value = make_validation(passed=True, phase=Phase.BUILD)
+
+        cfg = BuildConfig(resume=True)
+        result = await build_product("Artifact test", project, build_config=cfg)
+
+        phases_called = [entry[0] for entry in call_log]
+        # Analysis should be skipped (has STACK_DECISION.md)
+        assert Phase.ANALYSIS not in phases_called
+        # Design+Review should be re-run (no DESIGN.md)
+        assert Phase.DESIGN in phases_called

@@ -691,3 +691,125 @@ class TestTotalDurationS:
         """Test that total_duration_s returns a float."""
         reporter = ProgressReporter(output=io.StringIO())
         assert isinstance(reporter.total_duration_s, float)
+
+
+# ---------------------------------------------------------------------------
+# phase_skipped (v9.1)
+# ---------------------------------------------------------------------------
+
+class TestPhaseSkipped:
+    """Tests for the phase_skipped method (v9.1 crash recovery)."""
+
+    def test_increments_counter(self):
+        """phase_skipped should increment the phase counter."""
+        reporter = ProgressReporter(output=io.StringIO())
+        reporter.phase_skipped("Analysis")
+        assert reporter._phase_count == 1
+
+    def test_writes_skipped_label(self):
+        """Output should contain 'skipped' and the phase name."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.phase_skipped("Analysis")
+        output = buf.getvalue()
+        assert "skipped" in output
+        assert "Analysis" in output
+
+    def test_includes_detail(self):
+        """When detail is provided, it should appear in the output."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.phase_skipped("Analysis", "stack: nextjs-supabase")
+        assert "stack: nextjs-supabase" in buf.getvalue()
+
+    def test_no_detail_no_parens(self):
+        """When detail is empty, no parentheses should appear."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.phase_skipped("Enrich")
+        output = buf.getvalue()
+        assert "(" not in output
+
+    def test_counter_label_correct(self):
+        """Counter label should reflect current phase number."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.set_total_phases(9)
+        reporter.phase_skipped("Analysis")
+        assert "[1/9]" in buf.getvalue()
+
+    def test_multiple_skips_increment(self):
+        """Multiple phase_skipped calls should increment counter correctly."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.set_total_phases(9)
+        reporter.phase_skipped("Analysis")
+        reporter.phase_skipped("Design")
+        reporter.phase_skipped("Review")
+        assert reporter._phase_count == 3
+        assert "[3/9]" in buf.getvalue()
+
+    def test_output_ends_with_newline(self):
+        """Output should end with a newline."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.phase_skipped("Test")
+        assert buf.getvalue().endswith("\n")
+
+
+# ---------------------------------------------------------------------------
+# build_resume_header (v9.1)
+# ---------------------------------------------------------------------------
+
+class TestBuildResumeHeader:
+    """Tests for build_resume_header (v9.1 crash recovery)."""
+
+    def test_writes_resuming_label(self):
+        """Output should contain 'Resuming:' instead of 'Building:'."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.build_resume_header("Todo app", "build")
+        output = buf.getvalue()
+        assert "Resuming:" in output
+        assert "Todo app" in output
+
+    def test_writes_resume_phase(self):
+        """Output should show which phase we're resuming from."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.build_resume_header("Todo app", "build")
+        assert "Resuming from: build" in buf.getvalue()
+
+    def test_truncates_long_idea(self):
+        """Long ideas should be truncated at 60 characters."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        long_idea = "x" * 80
+        reporter.build_resume_header(long_idea, "analysis")
+        output = buf.getvalue()
+        assert "x" * 57 + "..." in output
+        assert "x" * 80 not in output
+
+    def test_exactly_60_not_truncated(self):
+        """An idea of exactly 60 characters should not be truncated."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        idea = "y" * 60
+        reporter.build_resume_header(idea, "deploy")
+        output = buf.getvalue()
+        assert "y" * 60 in output
+        assert "..." not in output
+
+    def test_includes_version(self):
+        """Version should appear in the header."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.build_resume_header("app", "build", version="9.1")
+        assert "v9.1" in buf.getvalue()
+
+    def test_does_not_say_building(self):
+        """Resume header should NOT contain 'Building:'."""
+        buf = io.StringIO()
+        reporter = ProgressReporter(output=buf)
+        reporter.build_resume_header("app", "build")
+        assert "Building:" not in buf.getvalue()

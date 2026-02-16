@@ -571,6 +571,8 @@ def build_product(
             require_tests=config.REQUIRE_PASSING_TESTS,
             design_file=design_file,
             enhance_features=enhance_features or [],
+            resume=resume,
+            resume_from=resume_checkpoint,
         )
         result = asyncio.run(build_product_v8(idea, project_dir, build_cfg))
         if result.success:

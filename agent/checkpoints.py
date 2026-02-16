@@ -6,7 +6,9 @@ Includes cleanup, archiving, and artifact hashing.
 
 import hashlib
 import json
+import os
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 from datetime import datetime
@@ -57,13 +59,25 @@ class CheckpointManager:
         }
 
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.json"
-        with open(checkpoint_path, "w") as f:
-            json.dump(checkpoint_data, f, indent=2)
-
-        # Also save as "latest" for easy access
         latest_path = self.checkpoint_dir / "latest.json"
-        with open(latest_path, "w") as f:
-            json.dump(checkpoint_data, f, indent=2)
+        serialized = json.dumps(checkpoint_data, indent=2)
+
+        # Atomic write: write to temp file, then os.replace() to target.
+        # os.replace() is atomic on POSIX when src and dst are on the same filesystem.
+        # This prevents half-written checkpoints if the process crashes mid-write.
+        for target in (checkpoint_path, latest_path):
+            fd, tmp_path = tempfile.mkstemp(dir=str(self.checkpoint_dir), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(serialized)
+                os.replace(tmp_path, str(target))
+            except Exception:
+                # Clean up temp file on error, then re-raise
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
         return checkpoint_id
 
@@ -243,6 +257,45 @@ class CheckpointManager:
         except Exception:
             pass  # Hashing is best-effort — checkpoint saving must always succeed
         return hashes
+
+    def verify_artifacts(self, checkpoint_id: str | None = None) -> tuple[bool, list[str]]:
+        """Compare stored artifact hashes against current files on disk.
+
+        Loads the checkpoint's artifact_hashes and re-hashes each file.
+        Reports which artifacts have changed or gone missing since the checkpoint was saved.
+
+        Args:
+            checkpoint_id: Specific checkpoint to verify (defaults to latest)
+
+        Returns:
+            Tuple of (all_match, list of mismatched/missing filenames)
+        """
+        if checkpoint_id:
+            checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.json"
+        else:
+            checkpoint_path = self.checkpoint_dir / "latest.json"
+
+        if not checkpoint_path.exists():
+            return False, ["checkpoint file not found"]
+
+        with open(checkpoint_path) as f:
+            data = json.load(f)
+
+        stored_hashes = data.get("artifact_hashes", {})
+        if not stored_hashes:
+            return True, []  # No hashes stored — nothing to verify
+
+        mismatched = []
+        for filename, stored_hash in stored_hashes.items():
+            file_path = self.project_dir / filename
+            if not file_path.exists():
+                mismatched.append(filename)
+                continue
+            current_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            if current_hash != stored_hash:
+                mismatched.append(filename)
+
+        return len(mismatched) == 0, mismatched
 
     def get_resume_prompt(self, state: AgentState) -> str:
         """Generate a prompt for resuming from a checkpoint.

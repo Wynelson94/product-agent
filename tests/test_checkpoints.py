@@ -636,3 +636,142 @@ class TestPhaseHistoryCap:
 
         assert len(state.phase_history) == 3
         assert state.phase_history[0]["notes"] == "first"
+
+
+# ---------------------------------------------------------------------------
+# TestAtomicWrites (v9.1)
+# ---------------------------------------------------------------------------
+
+class TestAtomicWrites:
+    """Tests for atomic checkpoint writing (v9.1).
+
+    The save() method uses tempfile + os.replace() for crash-safe writes.
+    These tests verify no temp files are left behind and data integrity is preserved.
+    """
+
+    def test_no_tmp_files_after_save(self, tmp_path):
+        """After save(), no .tmp files should remain in the checkpoint directory."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        mgr.save(state)
+
+        tmp_files = list((tmp_path / ".agent_checkpoints").glob("*.tmp"))
+        assert len(tmp_files) == 0
+
+    def test_save_is_valid_json(self, tmp_path):
+        """Checkpoint files written atomically should contain valid JSON."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path, idea="atomic test", phase=Phase.BUILD, stack_id="rails")
+        cp_id = mgr.save(state)
+
+        checkpoint_path = tmp_path / ".agent_checkpoints" / f"{cp_id}.json"
+        data = json.loads(checkpoint_path.read_text())
+        assert data["state"]["idea"] == "atomic test"
+        assert data["state"]["stack_id"] == "rails"
+
+    def test_latest_json_matches_checkpoint(self, tmp_path):
+        """latest.json should contain identical data to the named checkpoint file."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path, idea="latest match")
+        cp_id = mgr.save(state)
+
+        checkpoint_data = json.loads(
+            (tmp_path / ".agent_checkpoints" / f"{cp_id}.json").read_text()
+        )
+        latest_data = json.loads(
+            (tmp_path / ".agent_checkpoints" / "latest.json").read_text()
+        )
+        assert checkpoint_data == latest_data
+
+    def test_multiple_saves_no_tmp_files(self, tmp_path):
+        """Multiple rapid saves should not leave any temp files."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        for phase in [Phase.INIT, Phase.ANALYSIS, Phase.DESIGN, Phase.BUILD]:
+            state.phase = phase
+            mgr.save(state, phase=phase)
+
+        tmp_files = list((tmp_path / ".agent_checkpoints").glob("*.tmp"))
+        assert len(tmp_files) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestVerifyArtifacts (v9.1)
+# ---------------------------------------------------------------------------
+
+class TestVerifyArtifacts:
+    """Tests for CheckpointManager.verify_artifacts() (v9.1).
+
+    verify_artifacts() compares stored sha256 hashes against current files
+    to detect modifications or deletions since the checkpoint was saved.
+    """
+
+    def test_all_match_returns_true(self, tmp_path):
+        """When artifacts haven't changed, returns (True, [])."""
+        (tmp_path / "DESIGN.md").write_text("# Design\n")
+        (tmp_path / "STACK_DECISION.md").write_text("# Stack\n")
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        cp_id = mgr.save(state)
+
+        all_ok, mismatched = mgr.verify_artifacts(cp_id)
+        assert all_ok is True
+        assert mismatched == []
+
+    def test_modified_artifact_detected(self, tmp_path):
+        """When an artifact is modified after checkpoint, it's detected."""
+        (tmp_path / "DESIGN.md").write_text("# Original Design\n")
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        cp_id = mgr.save(state)
+
+        # Modify the artifact after checkpoint
+        (tmp_path / "DESIGN.md").write_text("# Modified Design\n")
+
+        all_ok, mismatched = mgr.verify_artifacts(cp_id)
+        assert all_ok is False
+        assert "DESIGN.md" in mismatched
+
+    def test_missing_artifact_detected(self, tmp_path):
+        """When an artifact is deleted after checkpoint, it's detected."""
+        design = tmp_path / "DESIGN.md"
+        design.write_text("# Design\n")
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        cp_id = mgr.save(state)
+
+        design.unlink()
+
+        all_ok, mismatched = mgr.verify_artifacts(cp_id)
+        assert all_ok is False
+        assert "DESIGN.md" in mismatched
+
+    def test_no_artifacts_returns_true(self, tmp_path):
+        """When no .md artifacts exist at save time, returns (True, [])."""
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        cp_id = mgr.save(state)
+
+        all_ok, mismatched = mgr.verify_artifacts(cp_id)
+        assert all_ok is True
+        assert mismatched == []
+
+    def test_latest_checkpoint_used_by_default(self, tmp_path):
+        """When checkpoint_id is None, uses latest.json."""
+        (tmp_path / "DESIGN.md").write_text("# Design\n")
+
+        mgr = CheckpointManager(str(tmp_path))
+        state = _make_state(tmp_path)
+        mgr.save(state)
+
+        all_ok, mismatched = mgr.verify_artifacts()
+        assert all_ok is True
+
+    def test_nonexistent_checkpoint_returns_false(self, tmp_path):
+        """When checkpoint file doesn't exist, returns (False, [...])."""
+        mgr = CheckpointManager(str(tmp_path))
+        all_ok, mismatched = mgr.verify_artifacts("nonexistent_20260101_000000")
+        assert all_ok is False

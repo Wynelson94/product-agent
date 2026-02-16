@@ -75,3 +75,6 @@ SWIFT_MIN_TESTS_HOST = int(get_env("SWIFT_MIN_TESTS_HOST", "15"))
 PHASE_TIMEOUT_S = int(get_env("PHASE_TIMEOUT_S", "600"))  # 10 min default
 BUILD_PHASE_TIMEOUT_S = int(get_env("BUILD_PHASE_TIMEOUT_S", "900"))  # 15 min for build
 MAX_TOTAL_TURNS = int(get_env("MAX_TOTAL_TURNS", "300"))  # Total turns across entire build
+
+# v9.1: Crash recovery
+ENABLE_ARTIFACT_VERIFICATION = get_env("ENABLE_ARTIFACT_VERIFICATION", "true").lower() == "true"

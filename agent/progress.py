@@ -70,11 +70,36 @@ class ProgressReporter:
             self.output.write(f"\r{line:<55} {status} {duration:>6}  (parallel)\n")
             self.output.flush()
 
+    def phase_skipped(self, phase_name: str, detail: str = "") -> None:
+        """Report that a phase was skipped during resume.
+
+        Increments the phase counter without running the phase,
+        so subsequent phases show correct numbering.
+        """
+        self._phase_count += 1
+        label = f"[{self._phase_count}/{self._total_phases}]"
+        detail_str = f" ({detail})" if detail else ""
+        line = f"{label} {phase_name}...skipped{detail_str}"
+        self.output.write(f"\r{line:<55}\n")
+        self.output.flush()
+
     def build_header(self, idea: str, version: str = "8.0") -> None:
         """Print build header."""
         # Truncate long ideas
         display_idea = idea if len(idea) <= 60 else idea[:57] + "..."
         self.output.write(f"\nProduct Agent v{version} — Building: \"{display_idea}\"\n\n")
+        self.output.flush()
+
+    def build_resume_header(self, idea: str, resume_phase: str, version: str = "8.0") -> None:
+        """Print build header for a resumed build.
+
+        Shows which phase the build is resuming from instead of starting fresh.
+        """
+        display_idea = idea if len(idea) <= 60 else idea[:57] + "..."
+        self.output.write(
+            f"\nProduct Agent v{version} — Resuming: \"{display_idea}\"\n"
+            f"  Resuming from: {resume_phase}\n\n"
+        )
         self.output.flush()
 
     def build_complete(self, url: str | None, quality: str | None = None) -> None:
