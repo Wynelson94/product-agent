@@ -430,15 +430,71 @@ def _validate_build(project_dir: Path) -> ValidationResult:
         if (project_dir / pf).exists():
             result.add_info(f"Package file: {pf}")
 
+    # v10.0: Cross-check DESIGN.md dependencies against package.json
+    design_path = project_dir / "DESIGN.md"
+    package_path = project_dir / "package.json"
+    if design_path.exists() and package_path.exists():
+        import json as _json
+        design_content = design_path.read_text()
+        try:
+            pkg = _json.loads(package_path.read_text())
+            all_deps: set[str] = set()
+            all_deps.update(pkg.get("dependencies", {}).keys())
+            all_deps.update(pkg.get("devDependencies", {}).keys())
+
+            # Extract npm package references from DESIGN.md (pattern: @scope/name or bare-name)
+            import_pattern = re.compile(r"`(@[\w-]+/[\w.-]+)`")
+            design_packages = {m.group(1) for m in import_pattern.finditer(design_content)}
+
+            # Filter to scoped packages (@scope/name) — these are unambiguously npm packages
+            missing = design_packages - all_deps
+            if missing:
+                result.extracted["missing_deps"] = sorted(missing)
+                for dep in sorted(missing):
+                    result.add_info(f"DESIGN.md references '{dep}' but not in package.json")
+        except (ValueError, KeyError):
+            pass  # Malformed package.json — don't block on this
+
     # Post-build functional check: verify expected routes exist (v9.0)
     route_result = validate_build_routes(project_dir, strict=False)
     if route_result.extracted.get("missing_routes"):
-        missing = route_result.extracted["missing_routes"]
-        result.extracted["missing_routes"] = missing
-        for route in missing:
+        missing_routes = route_result.extracted["missing_routes"]
+        result.extracted["missing_routes"] = missing_routes
+        for route in missing_routes:
             result.add_info(f"Missing route: {route}")
 
     return result
+
+
+def _apply_critical_override(result: ValidationResult, content: str) -> None:
+    """Override audit PASS status when CRITICAL discrepancies exist in the body.
+
+    v10.0: The auditor sometimes reports status: PASS despite finding CRITICAL
+    issues. This function scans the audit body for CRITICAL markers in
+    discrepancy tables and overrides the status to failed.
+    """
+    if result.extracted.get("passed") is not True:
+        return  # Already failing, no override needed
+
+    content_lower = content.lower()
+    # Look for CRITICAL in table rows (| CRITICAL |) or structured markers
+    has_critical = (
+        "| critical |" in content_lower
+        or "severity: critical" in content_lower
+        or "| critical|" in content_lower
+    )
+    if has_critical:
+        # Count occurrences of "critical" in table row context
+        # Each "| CRITICAL |" or "| CRITICAL|" is one finding
+        critical_count = content_lower.count("| critical |") + content_lower.count("| critical|")
+        if critical_count == 0:
+            critical_count = 1  # At least 1 from "severity: critical"
+        result.extracted["passed"] = False
+        result.extracted["critical_count"] = critical_count
+        result.add_info(
+            f"Audit overridden: {critical_count} CRITICAL finding(s) "
+            f"found despite PASS status"
+        )
 
 
 def _validate_audit(project_dir: Path) -> ValidationResult:
@@ -474,6 +530,9 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
         elif status == "fail":
             result.extracted["passed"] = False
             result.add_info("Audit found issues (front-matter)")
+
+        # v10.0: Override PASS when CRITICAL discrepancies exist in the audit body
+        _apply_critical_override(result, content)
         return result
 
     # Fallback: regex parsing
@@ -501,6 +560,8 @@ def _validate_audit(project_dir: Path) -> ValidationResult:
         result.extracted["passed"] = False
         result.add_info("Audit found issues")
 
+    # v10.0: Override PASS when CRITICAL discrepancies exist in the audit body
+    _apply_critical_override(result, content)
     return result
 
 

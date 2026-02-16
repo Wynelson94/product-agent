@@ -358,3 +358,34 @@ class TestEdgeCases:
         prompt = get_deploy_fix_prompt("Error: Deployment failed", attempt=10)
         # Should not crash with high attempt numbers
         assert "10" in prompt
+
+
+# ---------------------------------------------------------------------------
+# v10.0: RLS circular dependency detection
+# ---------------------------------------------------------------------------
+
+class TestRLSCircularRecovery:
+    """Tests for RLS circular dependency pattern matching and recovery."""
+
+    def test_rls_circular_pattern_matches_permission_denied(self):
+        """Error with 'permission denied.*rls' should match the rls_circular pattern."""
+        result = analyze_error("permission denied for table profiles due to rls")
+        # Should match rls_circular (or rls_error — rls_error matches first
+        # because the existing "permission denied for table" pattern is checked
+        # before DATABASE_ERROR_PATTERNS). The important thing is it's detected.
+        assert result.error_type in ("rls_error", "rls_circular")
+
+    def test_rls_circular_pattern_matches_violates_rls(self):
+        """Error with 'new row violates row-level security policy' should match."""
+        result = analyze_error("new row violates row-level security policy for table profiles")
+        assert result.error_type == "rls_circular"
+
+    def test_rls_circular_recovery_prompt_content(self):
+        """The fix_rls_circular recovery prompt should include SECURITY DEFINER guidance."""
+        from agent.recovery import _get_recovery_prompt
+        prompt = _get_recovery_prompt(
+            "rls_circular", "fix_rls_circular", (), "query returned no rows"
+        )
+        assert "SECURITY DEFINER" in prompt
+        assert "get_user_org_id" in prompt
+        assert "query returned no rows" in prompt

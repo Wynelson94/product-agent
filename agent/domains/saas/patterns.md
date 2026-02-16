@@ -116,6 +116,12 @@ create policy "Admins can manage projects"
   );
 ```
 
+### RLS Anti-Pattern Warning
+**NEVER** write an RLS policy where a table's SELECT policy subqueries the same table.
+This commonly affects the `profiles` or `users` table in multi-tenant apps where the
+table stores both the user-to-org mapping and org-scoped data.
+See the stack-specific patterns.md for the SECURITY DEFINER fix pattern.
+
 ### Organization Context Middleware
 ```typescript
 // middleware.ts - Set organization context

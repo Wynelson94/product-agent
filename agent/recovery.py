@@ -136,6 +136,11 @@ DATABASE_ERROR_PATTERNS: dict[str, dict] = {
         "type": "constraint_error",
         "action": "handle_duplicate",
     },
+    # v10.0: RLS circular dependency — table's policy subqueries itself
+    r"new row violates row-level security policy|query returned no rows|permission denied.*rls": {
+        "type": "rls_circular",
+        "action": "fix_rls_circular",
+    },
 }
 
 
@@ -291,6 +296,30 @@ Check that RLS policies allow the current operation:
 1. Verify the user is authenticated
 2. Check the policy conditions match the user's context
 3. Review DESIGN.md for the expected RLS policies
+
+Original error: {original_error}"""
+
+    elif action == "fix_rls_circular":
+        # v10.0: Specific guidance for RLS circular dependencies
+        return f"""RLS circular dependency detected — a table's RLS policy may be
+subquerying itself, causing PostgreSQL to silently return 0 rows.
+
+Common culprit: profiles/users table with org-scoped RLS that looks up the
+user's org_id FROM the same table the policy protects.
+
+Fix pattern:
+1. Create a SECURITY DEFINER function that bypasses RLS:
+   CREATE OR REPLACE FUNCTION get_user_org_id()
+   RETURNS uuid AS $$
+     SELECT org_id FROM profiles WHERE user_id = auth.uid()
+   $$ LANGUAGE sql SECURITY DEFINER;
+
+2. Update the RLS policy to use the function instead of a subquery:
+   CREATE POLICY "Users can view org data" ON profiles FOR SELECT
+   USING (org_id = get_user_org_id());
+
+3. For API routes that need cross-org admin access, use a service role client
+   (admin client pattern) instead of the anon key.
 
 Original error: {original_error}"""
 

@@ -352,6 +352,10 @@ async def build_product(
             elif audit_validation.extracted.get("discrepancies"):
                 state.spec_audit_discrepancies = audit_validation.extracted["discrepancies"]
 
+            # v10.0: Track CRITICAL findings count from audit validation
+            if audit_validation.extracted.get("critical_count"):
+                state.spec_audit_critical_count = audit_validation.extracted["critical_count"]
+
             # Process test results
             test_detail = ""
             if test_validation.extracted.get("tests_passed"):

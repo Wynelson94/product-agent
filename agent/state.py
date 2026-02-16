@@ -100,6 +100,7 @@ class AgentState:
     # v6.0: Spec audit tracking
     spec_audit_completed: bool = False
     spec_audit_discrepancies: int = 0
+    spec_audit_critical_count: int = 0  # v10.0: Count of CRITICAL findings from audit
     audit_fix_attempted: bool = False
 
     # v7.0: Swift/SwiftUI plugin architecture

@@ -51,6 +51,14 @@ src/
 └── middleware.ts
 ```
 
+## Route Groups and Root Page
+
+When using route groups like `(auth)`, `(dashboard)`, `(marketing)`:
+- The root `src/app/page.tsx` MUST be explicitly created with your landing page content
+- Route groups do NOT replace the root page — `(marketing)/page.tsx` renders at `/(marketing)`, not `/`
+- The root `page.tsx` is what users see at `/` — never leave it as the default Next.js template
+- If your landing page is in a route group, ALSO create `src/app/page.tsx` that either contains the landing page or redirects to it
+
 ## Environment Template
 
 Create `.env.local.example`:

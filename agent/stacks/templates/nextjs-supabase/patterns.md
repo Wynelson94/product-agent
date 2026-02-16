@@ -385,3 +385,39 @@ create policy "Users can delete own items"
   on items for delete
   using (auth.uid() = user_id);
 ```
+
+## RLS Anti-Patterns (NEVER DO THIS)
+
+### Circular Self-Reference
+A table's RLS policy must NEVER subquery the SAME table. PostgreSQL silently
+returns 0 rows instead of raising an error, making ALL queries return empty.
+
+**BAD** — profiles policy queries profiles:
+```sql
+create policy "Users can view own profile"
+  on profiles for select
+  using (org_id in (select org_id from profiles where user_id = auth.uid()));
+-- ^^^ This creates a circular dependency: to SELECT from profiles, you must
+-- first SELECT from profiles. PostgreSQL returns 0 rows silently.
+```
+
+**GOOD** — use SECURITY DEFINER to break the cycle:
+```sql
+-- SECURITY DEFINER bypasses RLS, breaking the circular dependency.
+create or replace function get_user_org_id()
+returns uuid as $$
+  select org_id from profiles where user_id = auth.uid()
+$$ language sql security definer;
+
+create policy "Users can view own profile"
+  on profiles for select
+  using (org_id = get_user_org_id());
+```
+
+### When This Happens
+This pattern appears when a table (typically `profiles` or `users`) stores BOTH:
+1. The user-to-org mapping (which org does user X belong to?)
+2. Org-scoped data (show me all users in org Y)
+
+The SELECT policy needs to look up the user's org, but that lookup itself
+requires a SELECT on the same table — creating the circular dependency.

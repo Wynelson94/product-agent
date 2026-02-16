@@ -206,6 +206,34 @@ For Supabase stacks, include RLS policies in SQL format.
 For Prisma stacks, include the Prisma schema.
 For Rails, include migration structure.
 
+#### RLS Anti-Patterns (CRITICAL for Supabase)
+
+NEVER create RLS policies where a table's policy subqueries the SAME table.
+This causes PostgreSQL to silently return 0 rows (not an error), breaking ALL
+data access through that table.
+
+BAD — profiles policy queries profiles (circular):
+```sql
+create policy "Users can view own profile"
+  on profiles for select
+  using (org_id in (select org_id from profiles where user_id = auth.uid()));
+```
+
+GOOD — use a SECURITY DEFINER function to break the cycle:
+```sql
+create or replace function get_user_org_id()
+returns uuid as $$
+  select org_id from profiles where user_id = auth.uid()
+$$ language sql security definer;
+
+create policy "Users can view own profile"
+  on profiles for select
+  using (org_id = get_user_org_id());
+```
+
+When a table stores the user-to-org mapping AND has org-scoped RLS, you MUST
+use a SECURITY DEFINER helper function to look up the org_id.
+
 ### 2. Pages/Routes
 | Route | Purpose | Auth Required |
 |-------|---------|---------------|
@@ -352,6 +380,8 @@ Review DESIGN.md and validate it's ready for implementation.
 - [ ] All tables have primary keys
 - [ ] Foreign keys are correctly defined
 - [ ] RLS policies cover all CRUD operations (for Supabase)
+- [ ] No RLS circular dependencies (table policy must NOT subquery itself)
+- [ ] Multi-table RLS uses SECURITY DEFINER helpers for cross-table lookups
 - [ ] No obvious N+1 query patterns
 - [ ] Indexes defined for common queries
 
@@ -466,6 +496,18 @@ If build fails:
 3. Fix the specific issue
 4. Re-run build
 5. Repeat up to 5 times
+
+## Dependency Verification (CRITICAL)
+After installing packages in step 2, cross-check DESIGN.md for ALL libraries
+it references. If DESIGN.md mentions a library (e.g., @react-pdf/renderer,
+recharts, @tanstack/react-table), you MUST `npm install` it explicitly.
+Do NOT assume create-next-app or shadcn includes it.
+
+## Data Wiring Verification
+When building dashboard or data display pages:
+- Components MUST fetch real data from Supabase/API, not pass `data={[]}` or `data={mockData}`
+- Every chart, table, and list component must have a data-fetching hook or server component query
+- If a component accepts a `data` prop, the PARENT must provide actual fetched data
 
 ## Rules
 - Don't explain. Just build.
@@ -1009,6 +1051,8 @@ Only mark verification as PASSED if core functionality works.
 - Read DESIGN.md to identify core features
 - Test one core feature page loads
 - Verify no JavaScript errors or broken UI
+- Check that the homepage is NOT the default Next.js template (look for "Get started by editing")
+- Verify dashboard pages show real data structure, not empty states or placeholder content
 
 ## Tools Available
 - **WebFetch**: Fetch URLs and analyze content
@@ -1509,6 +1553,24 @@ Compare specific values between ORIGINAL_PROMPT.md and the source code:
 ### 5. Branding/Colors
 - Color palette matches what was specified
 - Tailwind config includes the defined colors
+
+### 6. Dependency Audit (CRITICAL)
+Cross-check DESIGN.md against package.json:
+- Read DESIGN.md and extract ALL library/package references
+- Read package.json and check each referenced library exists in dependencies or devDependencies
+- Any library mentioned in DESIGN.md but missing from package.json is a CRITICAL discrepancy
+- Report severity as CRITICAL (not MINOR) — missing deps cause runtime crashes
+
+### 7. Data Wiring Audit
+For every data-display component (charts, tables, lists, dashboards):
+- Grep for `data={[]}`, `data={mockData}`, or hardcoded empty arrays passed as props
+- Verify that parent components fetch data from Supabase/API before passing to children
+- Components with empty/mock data passed as props are CRITICAL discrepancies
+
+## Status Rules
+- **PASS**: 0 CRITICAL discrepancies, minor issues only
+- **NEEDS_FIX**: 1+ CRITICAL discrepancies found
+- Never report status: PASS when CRITICAL discrepancies exist
 
 ## Tools Available
 - **Read**: Read source files, ORIGINAL_PROMPT.md, DESIGN.md

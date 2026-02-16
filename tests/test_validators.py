@@ -21,6 +21,7 @@ from agent.validators import (
     _extract_design_routes,
     _route_to_page_path,
     _parse_frontmatter,
+    _apply_critical_override,
 )
 
 
@@ -750,6 +751,141 @@ class TestValidateAudit:
         result = _validate_audit(tmp_path)
         assert result.extracted["requirements_met"] == 7
         assert result.extracted["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# _apply_critical_override (v10.0)
+# ---------------------------------------------------------------------------
+
+class TestApplyCriticalOverride:
+    """Tests for the CRITICAL override logic that flips PASS to FAIL."""
+
+    def test_critical_in_table_overrides_pass(self, tmp_path):
+        """Audit with PASS status + '| CRITICAL |' in body should flip to failed."""
+        audit_content = """---
+status: PASS
+requirements_met: 16
+requirements_total: 18
+---
+# Spec Audit
+
+## Data Accuracy
+
+### CRITICAL Discrepancies
+| # | Category | Expected | Found | File | Severity |
+|---|----------|----------|-------|------|----------|
+| 1 | Dependency | @react-pdf/renderer | missing | package.json | CRITICAL |
+| 2 | Data | real data | data={[]} | dashboard.tsx | CRITICAL |
+"""
+        (tmp_path / "SPEC_AUDIT.md").write_text(audit_content)
+        result = _validate_audit(tmp_path)
+        # Should be overridden to False despite front-matter PASS
+        assert result.extracted["passed"] is False
+        assert result.extracted["critical_count"] == 2
+        assert any("CRITICAL" in m for m in result.messages)
+
+    def test_critical_count_extracted(self, tmp_path):
+        """Verify critical_count matches the number of '| CRITICAL |' occurrences."""
+        audit_content = """---
+status: PASS
+requirements_met: 8
+requirements_total: 10
+---
+| 1 | Price | $100 | $200 | file.ts | CRITICAL |
+| 2 | Name | Foo | Bar | file.ts | MINOR |
+| 3 | Dep | lib | missing | pkg.json | CRITICAL |
+| 4 | Data | real | mock | dash.tsx | CRITICAL |
+"""
+        (tmp_path / "SPEC_AUDIT.md").write_text(audit_content)
+        result = _validate_audit(tmp_path)
+        assert result.extracted["passed"] is False
+        assert result.extracted["critical_count"] == 3
+
+    def test_no_override_without_critical(self, tmp_path):
+        """PASS without CRITICAL content stays PASS."""
+        audit_content = """---
+status: PASS
+requirements_met: 10
+requirements_total: 10
+---
+# All good
+| 1 | Price | $100 | $100 | file.ts | MINOR |
+"""
+        (tmp_path / "SPEC_AUDIT.md").write_text(audit_content)
+        result = _validate_audit(tmp_path)
+        assert result.extracted["passed"] is True
+        assert "critical_count" not in result.extracted
+
+    def test_override_with_severity_colon_format(self):
+        """Direct test of _apply_critical_override with 'severity: critical'."""
+        from agent.state import Phase
+        result = ValidationResult(passed=True, phase=Phase.AUDIT)
+        result.extracted["passed"] = True
+        _apply_critical_override(result, "Some text\nseverity: critical\nmore text")
+        assert result.extracted["passed"] is False
+        assert result.extracted["critical_count"] == 1
+
+    def test_no_override_when_already_failed(self):
+        """If audit already failed, override does nothing."""
+        from agent.state import Phase
+        result = ValidationResult(passed=True, phase=Phase.AUDIT)
+        result.extracted["passed"] = False  # Already failed
+        _apply_critical_override(result, "| CRITICAL | stuff")
+        # Should still be False but no critical_count added
+        assert result.extracted["passed"] is False
+        assert "critical_count" not in result.extracted
+
+
+# ---------------------------------------------------------------------------
+# _validate_build dependency audit (v10.0)
+# ---------------------------------------------------------------------------
+
+class TestBuildDependencyAudit:
+    """Tests for the DESIGN.md → package.json dependency cross-check."""
+
+    def test_missing_deps_detected(self, tmp_path):
+        """DESIGN.md references @react-pdf/renderer, package.json lacks it."""
+        (tmp_path / "DESIGN.md").write_text(
+            "Use `@react-pdf/renderer` for PDF generation and `@tanstack/react-table` for tables."
+        )
+        (tmp_path / "package.json").write_text(
+            '{"dependencies": {"next": "14.0.0", "@tanstack/react-table": "8.0.0"}}'
+        )
+        # Need source dir for build validation to pass
+        src = tmp_path / "src" / "app"
+        src.mkdir(parents=True)
+        (src / "page.tsx").write_text("export default function() { return <div/> }")
+        result = _validate_build(tmp_path)
+        assert result.passed is True
+        assert "@react-pdf/renderer" in result.extracted.get("missing_deps", [])
+        assert "@tanstack/react-table" not in result.extracted.get("missing_deps", [])
+
+    def test_no_false_positive_deps(self, tmp_path):
+        """DESIGN.md with no scoped package refs should not report missing deps."""
+        (tmp_path / "DESIGN.md").write_text(
+            "Build a dashboard with charts and tables. Use standard components."
+        )
+        (tmp_path / "package.json").write_text(
+            '{"dependencies": {"next": "14.0.0"}}'
+        )
+        src = tmp_path / "src" / "app"
+        src.mkdir(parents=True)
+        (src / "page.tsx").write_text("export default function() { return <div/> }")
+        result = _validate_build(tmp_path)
+        assert result.passed is True
+        assert "missing_deps" not in result.extracted
+
+    def test_all_deps_present(self, tmp_path):
+        """When all referenced deps exist, no missing_deps reported."""
+        (tmp_path / "DESIGN.md").write_text("Use `@supabase/supabase-js` for auth.")
+        (tmp_path / "package.json").write_text(
+            '{"dependencies": {"@supabase/supabase-js": "2.0.0"}}'
+        )
+        src = tmp_path / "src" / "app"
+        src.mkdir(parents=True)
+        (src / "page.tsx").write_text("export default function() { return <div/> }")
+        result = _validate_build(tmp_path)
+        assert "missing_deps" not in result.extracted
 
 
 # ---------------------------------------------------------------------------

@@ -64,8 +64,13 @@ def compute_quality_score(
 
     # Spec coverage (20 points)
     if state.spec_audit_completed:
-        if state.spec_audit_discrepancies == 0:
+        # v10.0: CRITICAL findings penalty — each CRITICAL finding costs 5 points
+        critical_penalty = min(15, state.spec_audit_critical_count * 5)
+        if state.spec_audit_discrepancies == 0 and state.spec_audit_critical_count == 0:
             factors["spec_coverage"] = 20
+        elif state.spec_audit_critical_count > 0:
+            factors["spec_coverage"] = max(0, 15 - critical_penalty)
+            notes.append(f"{state.spec_audit_critical_count} CRITICAL audit finding(s)")
         elif state.spec_audit_discrepancies <= 2:
             factors["spec_coverage"] = 15
             notes.append(f"{state.spec_audit_discrepancies} spec discrepancies")
@@ -114,6 +119,15 @@ def compute_quality_score(
         if total > 79:
             total = 79  # 79 = grade B- ceiling (80+ would be B)
             notes.append("Score capped: no tests generated (max grade B-)")
+
+    # v10.0: CRITICAL audit findings cap — can't get A with CRITICAL issues
+    if state.spec_audit_critical_count > 0:
+        if total > 84:
+            total = 84  # 84 = grade B ceiling (85+ would be B+)
+            notes.append(
+                f"Score capped: {state.spec_audit_critical_count} CRITICAL "
+                f"audit finding(s) (max grade B)"
+            )
 
     total = max(0, min(100, total))
 

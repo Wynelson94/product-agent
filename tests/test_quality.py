@@ -816,3 +816,72 @@ class TestFormatQualityReport:
         output = format_quality_report(report)
         first_line = output.split("\n")[0]
         assert first_line == "Quality: B+ (85%)"
+
+
+# ---------------------------------------------------------------------------
+# v10.0: CRITICAL audit findings penalty
+# ---------------------------------------------------------------------------
+
+class TestCriticalAuditPenalty:
+    """Tests for the spec_audit_critical_count penalty and cap."""
+
+    def test_critical_findings_reduce_spec_coverage(self):
+        """2 CRITICAL findings should reduce spec_coverage (5 pts each = 10 pt penalty)."""
+        state = _make_state(
+            tests_generated=True,
+            tests_passed=True,
+            spec_audit_completed=True,
+            spec_audit_discrepancies=0,
+            spec_audit_critical_count=2,
+            build_attempts=1,
+            design_revision=0,
+            deployment_verified=True,
+            deployment_url="https://example.com",
+        )
+        report = compute_quality_score(state)
+        # spec_coverage = max(0, 15 - 10) = 5
+        assert report.factors["spec_coverage"] == 5
+        assert any("CRITICAL" in n for n in report.notes)
+
+    def test_critical_findings_cap_at_84(self):
+        """Score should be capped at 84 when CRITICAL findings exist (max grade B)."""
+        state = _make_state(
+            tests_generated=True,
+            tests_passed=True,
+            spec_audit_completed=True,
+            spec_audit_discrepancies=0,
+            spec_audit_critical_count=1,
+            build_attempts=1,
+            design_revision=0,
+            deployment_verified=True,
+            deployment_url="https://example.com",
+        )
+        report = compute_quality_score(state)
+        # Without cap: 35 + 25 + 10 + 10 + 10 = 90, but cap at 84
+        assert report.score <= 84
+        assert report.grade == "B"
+        assert any("capped" in n.lower() for n in report.notes)
+
+    def test_zero_critical_no_penalty(self):
+        """0 CRITICAL findings should not change scoring from baseline."""
+        perfect = _perfect_state()
+        perfect.spec_audit_critical_count = 0
+        report = compute_quality_score(perfect)
+        assert report.factors["spec_coverage"] == 20
+        assert report.score == 100
+        assert report.grade == "A"
+
+    def test_many_critical_findings_floor_at_zero(self):
+        """Even with many CRITICAL findings, spec_coverage doesn't go negative."""
+        state = _make_state(
+            spec_audit_completed=True,
+            spec_audit_critical_count=10,
+            tests_generated=True,
+            tests_passed=True,
+            deployment_verified=True,
+            deployment_url="https://example.com",
+            build_attempts=1,
+            design_revision=0,
+        )
+        report = compute_quality_score(state)
+        assert report.factors["spec_coverage"] == 0  # max(0, 15 - 50) = 0
