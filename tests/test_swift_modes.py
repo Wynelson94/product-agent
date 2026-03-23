@@ -56,20 +56,19 @@ class TestSwiftStateFields:
         state.plugin_packaged = True
         assert state.plugin_packaged is True
 
-    def test_to_dict_does_not_include_build_mode(self):
-        """to_dict currently does NOT serialize v7.0 fields (known gap)."""
+    def test_to_dict_includes_build_mode(self):
+        """to_dict serializes build_mode (fixed in v10.0)."""
         state = AgentState()
         state.build_mode = "plugin"
         data = state.to_dict()
-        # v7.0 fields are not yet included in to_dict
-        assert "build_mode" not in data
+        assert data["build_mode"] == "plugin"
 
-    def test_to_dict_does_not_include_plugin_packaged(self):
-        """to_dict currently does NOT serialize plugin_packaged (known gap)."""
+    def test_to_dict_includes_plugin_packaged(self):
+        """to_dict serializes plugin_packaged (fixed in v10.0)."""
         state = AgentState()
         state.plugin_packaged = True
         data = state.to_dict()
-        assert "plugin_packaged" not in data
+        assert data["plugin_packaged"] is True
 
 
 # ---------------------------------------------------------------------------

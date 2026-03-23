@@ -372,8 +372,18 @@ async def build_product(
 
         # Quality gate: block deploy if tests failed. This prevents deploying
         # known-broken code. Can be disabled with require_tests=False.
+        # When phases were skipped on resume, use state.tests_passed directly
+        # (test_validation doesn't exist in the skip branch).
         if cfg.require_tests and not state.tests_passed:
-            if test_validation.extracted.get("all_passed") is False:
+            if not (audit_skip and test_skip):
+                # Only check test_validation when phases actually ran
+                if test_validation.extracted.get("all_passed") is False:
+                    return _build_failed(
+                        progress, "Tests failed",
+                        "Deployment blocked: tests must pass before deploy"
+                    )
+            else:
+                # Phases were skipped — state.tests_passed is already False
                 return _build_failed(
                     progress, "Tests failed",
                     "Deployment blocked: tests must pass before deploy"
@@ -435,13 +445,21 @@ async def build_product(
         quality_report = compute_quality_score(state)
         quality = f"{quality_report.grade} ({quality_report.score}%)"
 
+        # When audit+test were skipped on resume, audit_validation doesn't exist.
+        # Fall back to state fields which were populated in the original run.
+        if audit_skip and test_skip:
+            spec_met = state.spec_audit_discrepancies  # approximate: we only stored discrepancies
+            spec_coverage_str = f"?/? ({state.spec_audit_discrepancies} discrepancies)"
+        else:
+            spec_coverage_str = f"{audit_validation.extracted.get('requirements_met', '?')}/{audit_validation.extracted.get('requirements_total', '?')}"
+
         result = BuildResult(
             success=True,
             url=state.deployment_url,
             quality=quality,
             duration_s=progress.total_duration_s,
             test_count=test_detail,
-            spec_coverage=f"{audit_validation.extracted.get('requirements_met', '?')}/{audit_validation.extracted.get('requirements_total', '?')}",
+            spec_coverage=spec_coverage_str,
             phase_results=progress.results,
         )
 

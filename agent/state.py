@@ -276,7 +276,11 @@ class AgentState:
             # v6.0: Spec audit tracking
             "spec_audit_completed": self.spec_audit_completed,
             "spec_audit_discrepancies": self.spec_audit_discrepancies,
+            "spec_audit_critical_count": self.spec_audit_critical_count,
             "audit_fix_attempted": self.audit_fix_attempted,
+            # v7.0: Swift/SwiftUI plugin architecture
+            "build_mode": self.build_mode,
+            "plugin_packaged": self.plugin_packaged,
         }
 
     def to_json(self) -> str:
@@ -323,7 +327,11 @@ class AgentState:
         # v6.0: Spec audit tracking
         state.spec_audit_completed = data.get("spec_audit_completed", False)
         state.spec_audit_discrepancies = data.get("spec_audit_discrepancies", 0)
+        state.spec_audit_critical_count = data.get("spec_audit_critical_count", 0)
         state.audit_fix_attempted = data.get("audit_fix_attempted", False)
+        # v7.0: Swift/SwiftUI plugin architecture
+        state.build_mode = data.get("build_mode", "standard")
+        state.plugin_packaged = data.get("plugin_packaged", False)
         return state
 
     @classmethod
