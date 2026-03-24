@@ -331,6 +331,34 @@ async def build_product(
         )
         dynamic_build_timeout = config.BUILD_PHASE_TIMEOUT_S + extra_time
 
+        # v12.0: Pre-build scaffold phase for complex apps (10+ tables).
+        # Splits the work: scaffold installs deps, creates schema, sets up auth.
+        # Then the main build phase only needs to implement pages and components.
+        # This prevents timeout on complex apps where a single 80-turn build
+        # phase can't scaffold AND implement 100+ files.
+        scaffold_threshold = 10  # Tables needed to trigger scaffold split
+        if table_count >= scaffold_threshold and not (cfg.resume and _has_source_code(project_path)):
+            scaffold_context = (
+                "SCAFFOLD ONLY — Do NOT implement pages or components yet.\n"
+                "1. Run create-next-app with the flags from the Build Process Reference\n"
+                "2. Install ALL dependencies from DESIGN.md\n"
+                "3. Create the Prisma schema from DESIGN.md and run prisma generate\n"
+                "4. Create the base layout, auth setup (proxy.ts), and utility files\n"
+                "5. Set up test infrastructure (vitest)\n"
+                "6. Run npm run build to verify the scaffold compiles\n"
+                "STOP after scaffolding. Pages and components will be built in the next phase."
+            )
+            progress.log(f"Complex app ({table_count} tables) — running scaffold phase first")
+            scaffold_call, _ = await run_phase(
+                Phase.BUILD, state, project_path, progress,
+                retry_context=scaffold_context,
+                timeout_override=600,  # 10 min for scaffold only
+            )
+            _track_turns(scaffold_call)
+            if not scaffold_call.success:
+                progress.log(f"Scaffold phase failed: {scaffold_call.error}")
+                # Non-fatal — main build will attempt everything
+
         if cfg.resume and _should_skip_phase(state, Phase.BUILD, project_path):
             progress.phase_skipped("Build", f"{state.build_attempts} attempt(s)")
         else:
