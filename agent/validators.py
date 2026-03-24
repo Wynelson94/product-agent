@@ -132,6 +132,10 @@ def _validate_enrich(project_dir: Path) -> ValidationResult:
 
     content = prompt_md.read_text()
     if len(content) < 100:
+        # NOTE: add_error records the message but doesn't flip passed=False.
+        # This is intentional — enrichment is non-fatal (orchestrator line ~175
+        # continues even if enrichment fails). A short PROMPT.md is a warning,
+        # not a build-stopping error.
         result.add_error(f"PROMPT.md too short ({len(content)} chars) — enrichment may have failed")
 
     result.add_info(f"PROMPT.md exists ({len(content)} chars)")
@@ -480,11 +484,23 @@ def _validate_build(project_dir: Path) -> ValidationResult:
             all_deps.update(pkg.get("dependencies", {}).keys())
             all_deps.update(pkg.get("devDependencies", {}).keys())
 
-            # Extract npm package references from DESIGN.md (pattern: @scope/name or bare-name)
-            import_pattern = re.compile(r"`(@[\w-]+/[\w.-]+)`")
-            design_packages = {m.group(1) for m in import_pattern.finditer(design_content)}
+            # Extract npm package references from DESIGN.md backtick-quoted names.
+            # Two patterns: scoped (@scope/name) and bare (recharts, lucide-react).
+            # Scoped packages are unambiguous. Bare packages may false-positive on
+            # non-npm words, so we filter against a known-package heuristic (contains
+            # hyphen or starts with lowercase + has 3+ chars).
+            scoped_pattern = re.compile(r"`(@[\w-]+/[\w.-]+)`")
+            bare_pattern = re.compile(r"`([\w][\w.-]*[\w])`")  # 2+ char bare names in backticks
+            design_packages: set[str] = set()
+            design_packages.update(m.group(1) for m in scoped_pattern.finditer(design_content))
+            # Bare packages: only include likely npm names (contain hyphen or known prefixes)
+            for m in bare_pattern.finditer(design_content):
+                name = m.group(1)
+                # Heuristic: npm packages typically contain hyphens or dots
+                # Skip single words that are likely just code references (e.g. `string`, `true`)
+                if "-" in name or "." in name or name.startswith("react"):
+                    design_packages.add(name)
 
-            # Filter to scoped packages (@scope/name) — these are unambiguously npm packages
             missing = design_packages - all_deps
             if missing:
                 result.extracted["missing_deps"] = sorted(missing)
@@ -522,11 +538,13 @@ def _apply_critical_override(result: ValidationResult, content: str) -> None:
         or "| critical|" in content_lower
     )
     if has_critical:
-        # Count occurrences of "critical" in table row context
-        # Each "| CRITICAL |" or "| CRITICAL|" is one finding
-        critical_count = content_lower.count("| critical |") + content_lower.count("| critical|")
-        if critical_count == 0:
-            critical_count = 1  # At least 1 from "severity: critical"
+        # Count occurrences across both table format and key-value format.
+        # Table format: "| CRITICAL |" or "| CRITICAL|" (each row = one finding)
+        # Key-value format: "severity: critical" (each occurrence = one finding)
+        # These formats are mutually exclusive in practice (auditor uses one or the other).
+        table_count = content_lower.count("| critical |") + content_lower.count("| critical|")
+        kv_count = content_lower.count("severity: critical")
+        critical_count = max(table_count, kv_count, 1)  # At least 1 if has_critical is True
         result.extracted["passed"] = False
         result.extracted["critical_count"] = critical_count
         result.add_info(

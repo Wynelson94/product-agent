@@ -73,12 +73,12 @@ class AgentState:
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
 
-    # Phase history for debugging
-    phase_history: list = field(default_factory=list)
+    # Phase history for debugging — list of dicts with from/to/timestamp/notes keys
+    phase_history: list[dict] = field(default_factory=list)
 
     # Enhancement mode tracking
     enhancement_mode: bool = False
-    enhance_features: list = field(default_factory=list)
+    enhance_features: list[str] = field(default_factory=list)  # e.g. ["board-views", "dashboards"]
     original_design_path: Optional[str] = None
 
     # v5.0: Deployment-aware tracking
@@ -129,7 +129,11 @@ class AgentState:
         self.error_count += 1
 
     def can_revise_design(self, max_revisions: int = 2) -> bool:
-        """Check if we can do another design revision."""
+        """Check if we can do another design revision.
+
+        NOTE: Currently unused — the orchestrator uses range(max_revisions + 1)
+        directly. Kept as part of the public API for programmatic callers.
+        """
         return self.design_revision < max_revisions
 
     def can_retry_build(self, max_attempts: int = 5) -> bool:
@@ -184,11 +188,19 @@ class AgentState:
         self.verification_attempts += 1
 
     def can_retry_verification(self, max_attempts: int = 2) -> bool:
-        """Check if we can retry verification."""
+        """Check if we can retry verification.
+
+        NOTE: Currently unused — verification is a single-shot phase in the
+        orchestrator. Kept for future retry logic and programmatic API callers.
+        """
         return self.verification_attempts < max_attempts
 
     def can_retry_tests(self, max_attempts: int = 3) -> bool:
-        """Check if we can retry running tests."""
+        """Check if we can retry running tests.
+
+        NOTE: Currently unused — tests run once in the parallel Audit+Test phase.
+        Kept for future retry logic and programmatic API callers.
+        """
         return self.test_attempts < max_attempts
 
     def increment_test_attempt(self) -> None:
@@ -290,14 +302,27 @@ class AgentState:
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentState":
-        """Deserialize state from dictionary."""
+        """Deserialize state from dictionary (e.g., from a checkpoint JSON file).
+
+        Defensive against corrupted data: invalid enum values fall back to safe
+        defaults (Phase.FAILED, ReviewStatus.PENDING) instead of crashing with
+        ValueError. This prevents checkpoint corruption from blocking --resume.
+        """
         state = cls()
-        state.phase = Phase(data.get("phase", "init"))
+        # Phase and ReviewStatus can contain invalid values from corrupted checkpoints.
+        # try/except prevents ValueError from crashing deserialization.
+        try:
+            state.phase = Phase(data.get("phase", "init"))
+        except ValueError:
+            state.phase = Phase.FAILED  # Safe fallback: artifact checks determine resume point
         state.idea = data.get("idea", "")
         state.project_dir = data.get("project_dir", "")
         state.stack_id = data.get("stack_id")
         state.design_revision = data.get("design_revision", 0)
-        state.review_status = ReviewStatus(data.get("review_status", "pending"))
+        try:
+            state.review_status = ReviewStatus(data.get("review_status", "pending"))
+        except ValueError:
+            state.review_status = ReviewStatus.PENDING
         state.build_attempts = data.get("build_attempts", 0)
         state.last_build_error = data.get("last_build_error")
         state.deployment_url = data.get("deployment_url")
