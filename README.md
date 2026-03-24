@@ -1,4 +1,4 @@
-# Product Agent v10.0
+# Product Agent v11.1
 
 An autonomous AI agent that builds, tests, and deploys web and native iOS applications from plain English descriptions.
 
@@ -10,7 +10,7 @@ product-agent "Build me a todo app with user authentication"
 
 **Output:**
 ```
-Product Agent v10.0 — Building: "Build me a todo app with user authentication"
+Product Agent v11.1 — Building: "Build me a todo app with user authentication"
 
 [1/9] Enriching prompt...                    done   12s
 [2/9] Analyzing stack... → nextjs-supabase   done    8s
@@ -31,23 +31,30 @@ BUILD COMPLETE  5m 42s
 
 One prompt in, production app out. No human intervention required.
 
-## What's New in v10.0
+## What's New in v11.0
 
-v10.0 is a post-mortem driven release. After the ClientPulse stress test (12-table multi-tenant SaaS) scored B- instead of A, we traced every preventable failure back to a gap in the agent's prompts, validators, or patterns — and fixed all 4.
+### New Tech Stacks (v11.0)
+Three new stacks, expanding from 5 to 8 options:
+- **Django + HTMX** — Python web framework with server-rendered interactivity. Best for admin panels, data apps, and Python-native teams. Deploys to Railway.
+- **SvelteKit** — Lightweight modern JS framework with Svelte 5 runes. Best for fast SaaS, dashboards, and rapid prototypes. Deploys to Vercel.
+- **Astro** — Content-first framework with islands architecture. Best for blogs, docs, landing pages, and marketing sites. Deploys to Vercel.
 
-### Post-Mortem Fixes (v10.0)
-- **Dependency Audit** — Builder and auditor now cross-check DESIGN.md against package.json. Missing libraries (e.g., `@react-pdf/renderer`) are flagged as CRITICAL discrepancies instead of silently crashing at runtime.
-- **Data Wiring Verification** — Auditor greps for `data={[]}` and mock data props. Builder prompt requires components to fetch real data from Supabase/API, not pass empty arrays.
-- **RLS Circular Dependency Prevention** — Designer prompt warns against self-referencing RLS policies. Reviewer checklist includes circular dep checks. Stack patterns include BAD/GOOD examples with SECURITY DEFINER fix. Recovery system detects the pattern and suggests the fix.
-- **Root Page Routing** — Scaffold template clarifies that route groups don't replace the root `page.tsx`. Verifier checks the homepage isn't the default Next.js template.
-- **CRITICAL Override** — When the auditor finds CRITICAL discrepancies but reports `status: PASS`, the validator now overrides to FAIL. Quality scoring penalizes 5 pts per CRITICAL finding and caps at grade B (84).
+### Pipeline Features (v11.1)
+- **AI App Domain** — New domain pattern for AI-powered apps with AI SDK v6 patterns (streamText, useChat, structured output, chat history schema). The agent now knows how to build chatbots, AI assistants, and AI tools.
+- **CI/CD Generation** — Deploy templates now include GitHub Actions workflows for automated testing on PRs. Generated apps ship with CI out of the box.
+- **Observability** — Next.js deploy templates now include Vercel Analytics and Speed Insights setup. Built apps get production monitoring from day one.
 
-### Crash Recovery (v9.1)
-- **`--resume` now works in v8+ mode** — Loads the latest checkpoint, verifies artifacts on disk, and skips completed phases. A crash at phase 7 no longer requires re-running phases 1-6.
-- **Atomic Checkpoint Writes** — Checkpoints use `tempfile` + `os.replace()` to prevent half-written state on crash.
-- **Artifact Verification** — On resume, stored SHA-256 hashes are compared against files on disk. Mismatched artifacts trigger a re-run of that phase.
+### Enhancement Mode (v10.2)
+The enhancer agent (previously defined but never connected) is now fully wired into the pipeline. Enhancement mode runs: setup → ENHANCE → Build → Audit → Test → Deploy → Verify.
+
+### Template Modernization (v10.3)
+- Next.js templates updated for v16: `--yes`/`--turbopack` flags, `proxy.ts` notes, async request APIs, Cache Components (`'use cache'`)
+- Swift templates clarify `@Observable` vs `@Published` to prevent silent bugs
+- Expo templates add explicit `expo-router` installation
 
 ### Previous Versions
+- **v10.0** — Post-mortem fixes: dependency audit, data wiring verification, RLS circular dep prevention, CRITICAL override
+- **v9.1** — Crash recovery: `--resume` in v8+ mode, atomic checkpoints, artifact verification
 - **v9.0** — Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning
 - **v8.0** — Phase-by-phase orchestration, build memory, quality scoring, parallel audit+test, public API
 - **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest integration
@@ -87,12 +94,17 @@ The agent automatically selects the best stack for your product:
 | **nextjs-supabase** (default) | SaaS, internal tools, dashboards, content sites | PostgreSQL (Supabase) | Vercel |
 | **nextjs-prisma** | Marketplaces, multi-tenant, complex data | PostgreSQL | Vercel |
 | **rails** | Rapid prototyping, admin-heavy apps | PostgreSQL | Railway |
+| **django-htmx** | Admin panels, data apps, Python backends | PostgreSQL | Railway |
+| **sveltekit** | Fast SaaS, dashboards, interactive apps | Any | Vercel |
+| **astro** | Blogs, docs, landing pages, portfolios | None (static) | Vercel |
 | **expo-supabase** | Mobile apps, consumer apps | PostgreSQL (Supabase) | App Stores |
 | **swift-swiftui** | Native iOS apps, plugin modules | Local storage | TestFlight / SPM |
 
 Force a specific stack:
 ```bash
-product-agent --stack nextjs-prisma "Build a freelancer marketplace"
+product-agent --stack django-htmx "Build a data management admin panel"
+product-agent --stack astro "Build a documentation site"
+product-agent --stack sveltekit "Build a fast dashboard app"
 ```
 
 ## How It Works
@@ -117,11 +129,7 @@ User → build_product() →
 → BuildResult with URL, quality score, metrics
 ```
 
-Each `run_phase()` is its own Claude SDK call with:
-- Phase-specific prompt, tools, and turn limits
-- Code-level output validation (file existence, content checks)
-- Smart retry with error injection on failure
-- Real-time progress streaming
+Enhancement mode replaces Analyze + Design/Review with a single ENHANCE phase that modifies an existing design.
 
 ### Pipeline Phases
 
@@ -131,10 +139,11 @@ Each `run_phase()` is its own Claude SDK call with:
 | 2 | **Analyze** | Selects optimal tech stack | STACK_DECISION.md with valid stack ID |
 | 3 | **Design** | Creates data model, pages, components | DESIGN.md with required sections |
 | 4 | **Review** | Validates design (loop, max 3 revisions) | REVIEW.md with APPROVED/NEEDS_REVISION |
+| — | **Enhance** (enhancement mode) | Modifies existing design with new features | DESIGN.md updated with (NEW) markers |
 | 5 | **Build** | Implements full application (max 5 attempts) | Source files exist, entry point present |
 | 6 | **Audit** | Verifies build matches requirements | SPEC_AUDIT.md with pass/fail counts |
 | 7 | **Test** | Generates and runs tests | TEST_RESULTS.md with pass/fail counts |
-| 8 | **Deploy** | Deploys to production | Deployment URL extracted |
+| 8 | **Deploy** | Deploys to production + sets up CI/CD | Deployment URL extracted |
 | 9 | **Verify** | Tests deployed app | VERIFICATION.md with status |
 
 Audit and Test run in parallel. Design loops with Review until approved.
@@ -147,12 +156,12 @@ Audit and Test run in parallel. Design loops with Review until approved.
 | **analyzer** | Selects stack, validates compatibility | 15 |
 | **designer** | Creates DESIGN.md with architecture | 25 |
 | **reviewer** | Validates design completeness | 15 |
+| **enhancer** | Adds features to existing designs | 40 |
 | **builder** | Implements app with cross-referencing | 80 |
 | **auditor** | Audits build against original requirements | 20 |
 | **tester** | Generates and runs tests | 30 |
-| **deployer** | Deploys with pre-validation | 25 |
+| **deployer** | Deploys with pre-validation + observability setup | 25 |
 | **verifier** | Tests deployed app | 15 |
-| **enhancer** | Adds features to existing designs | 40 |
 
 ## Usage Examples
 
@@ -160,6 +169,13 @@ Audit and Test run in parallel. Design loops with Review until approved.
 
 ```bash
 product-agent "Build a task management app"
+```
+
+### AI-Powered Apps
+
+```bash
+product-agent "Build a chatbot for customer support with conversation history"
+product-agent "Build an AI-powered writing assistant"
 ```
 
 ### With Prompt Enrichment
@@ -172,6 +188,14 @@ Research a reference site:
 ```bash
 product-agent --enrich-url "https://example-nonprofit.org" \
   "Rebuild this nonprofit website"
+```
+
+### Enhancement Mode
+
+```bash
+product-agent --design-file ./project/DESIGN.md \
+  --enhance-features "board-views,dashboards" \
+  "Enhance project management app"
 ```
 
 ### Programmatic API
@@ -207,11 +231,6 @@ product-agent --stack swift-swiftui --mode plugin \
 # iOS host app
 product-agent --stack swift-swiftui --mode host \
   "NoCloud BS host app with plugin system"
-
-# Enhancement mode (add features to existing design)
-product-agent --design-file ./project/DESIGN.md \
-  --enhance-features "board-views,dashboards" \
-  "Enhance project management app"
 ```
 
 ### Other Options
@@ -255,11 +274,11 @@ Every build is logged to `.agent_history/builds.jsonl`:
 }
 ```
 
-Before starting a new build, the agent searches for similar past builds using Jaccard similarity and injects patterns from successful builds into the pipeline context. In v9.0, `failure_reasons` and `lessons` are recorded per build, and `get_relevant_lessons()` finds relevant past failures (boosted by stack match) to inject into builder prompts — preventing the same mistakes from repeating.
+Before starting a new build, the agent searches for similar past builds using Jaccard similarity and injects patterns from successful builds into the pipeline context. Failure reasons and lessons are recorded per build and injected into builder prompts to prevent repeating mistakes.
 
 ## Quality Scoring
 
-After all phases complete, a 5-factor quality score is computed. v9.0 rebalanced weights to prioritize **product outcomes** over process metrics:
+After all phases complete, a 5-factor quality score is computed:
 
 | Factor | Weight | What It Measures |
 |--------|--------|-----------------|
@@ -269,7 +288,7 @@ After all phases complete, a 5-factor quality score is computed. v9.0 rebalanced
 | Build Efficiency | 10 pts | How many build attempts were needed? |
 | Design Quality | 10 pts | How many design revisions were needed? |
 
-**Hard caps**: `deployment_verified=False` caps grade at C. `tests_generated=False` caps grade at B-. `spec_audit_critical_count > 0` caps grade at B (v10.0).
+**Hard caps**: `deployment_verified=False` caps grade at C. `tests_generated=False` caps grade at B-. `spec_audit_critical_count > 0` caps grade at B.
 
 Grades: **A** (95+), **A-** (90+), **B+** (85+), **B** (80+), **B-** (70+), **C** (60+), **F** (<60)
 
@@ -287,7 +306,7 @@ agent/
 ├── progress.py             # Real-time progress streaming
 ├── history.py              # Build memory with failure learning
 ├── quality.py              # Outcome-based quality scoring
-├── sanitize.py             # v9.0 — Input sanitization
+├── sanitize.py             # Input sanitization
 ├── config.py               # Environment configuration
 ├── state.py                # Phase and state management
 ├── checkpoints.py          # Checkpoint system with cleanup/archive
@@ -299,6 +318,7 @@ agent/
 │   ├── analyze.py          # Stack analysis phase
 │   ├── design.py           # Design phase
 │   ├── review.py           # Design review phase
+│   ├── enhance.py          # Enhancement phase (v10.2)
 │   ├── build.py            # Build phase
 │   ├── audit.py            # Spec audit phase
 │   ├── test.py             # Test phase
@@ -307,12 +327,15 @@ agent/
 ├── agents/
 │   └── definitions.py      # 10 subagent prompts + per-stack template injection
 ├── stacks/
-│   ├── criteria.py         # Stack definitions and scoring
+│   ├── criteria.py         # 8 stack definitions and scoring
 │   ├── selector.py         # Stack selection logic
 │   └── templates/          # Stack-specific templates
 │       ├── nextjs-supabase/
 │       ├── nextjs-prisma/
 │       ├── rails/
+│       ├── django-htmx/    # v11.0
+│       ├── sveltekit/      # v11.0
+│       ├── astro/          # v11.0
 │       ├── expo-supabase/
 │       └── swift-swiftui/
 ├── domains/
@@ -322,7 +345,8 @@ agent/
 │   ├── internal_tool/
 │   ├── content_site/
 │   ├── plugin_host/
-│   └── plugin_module/
+│   ├── plugin_module/
+│   └── ai_app/             # v11.0
 ├── hooks/
 │   ├── safety.py           # Safety hooks
 │   └── progress.py         # Progress reporting
@@ -337,23 +361,27 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-1,439 tests across 18 test files:
+1,627 tests across 22 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|---------|
 | `test_orchestrator_v8.py` | 114 | Full v8 pipeline, retry, quality gate, parallel phases |
-| `test_validators.py` | 93+ | All 9 phase validators, YAML front-matter, extraction |
-| `test_swift_modes.py` | 100 | Swift state, criteria, prompts, domains |
-| `test_quality.py` | 77+ | Outcome-based scoring, grade caps, report formatting |
 | `test_safety.py` | 183 | Blocked commands, shell-aware splitting, path protection |
 | `test_phases.py` | 142 | Phase registry, PhaseConfig, run_phase, SDK logging |
+| `test_swift_modes.py` | 100 | Swift state, criteria, prompts, domains |
+| `test_validators.py` | 93+ | All phase validators, YAML front-matter, extraction |
+| `test_new_stacks.py` | 80 | Django, SvelteKit, Astro definitions, selection, templates |
+| `test_quality.py` | 77+ | Outcome-based scoring, grade caps, report formatting |
 | `test_history.py` | 78 | BuildRecord, failure learning, similarity search |
 | `test_agent_prompts.py` | 74 | Registry, tools, all 10 agents, template injection |
 | `test_progress.py` | 55 | PhaseResult, ProgressReporter, formatting |
 | `test_checkpoints.py` | 44 | Save/load/resume, cleanup, archive, phase cap |
 | `test_stack_selection.py` | 44 | Keyword analysis, scoring, selection |
+| `test_enhancement.py` | 35 | Enhancement phase, validator, orchestrator, serialization |
+| `test_config.py` | 33 | Env var loading, feature flags, defaults |
 | `test_orchestration.py` | 34 | Legacy orchestration, build modes, prompt content |
 | `test_sanitize.py` | 25 | Input sanitization, injection markers, edge cases |
+| `test_pipeline_features.py` | 21 | AI domain, CI/CD, observability |
 | + 5 more | ~200+ | Recovery, validation, state v5/v6, CLI runner |
 
 ### Domain Patterns
@@ -364,6 +392,7 @@ python3 -m pytest tests/ -v
 | **saas** | SaaS, multi-tenant apps | Organizations, subscriptions, billing |
 | **internal_tool** | Admin panels, dashboards | Data tables, CRUD, reporting |
 | **content_site** | Nonprofits, portfolios, blogs | Static-first data, hero sections, FAQ accordion |
+| **ai_app** | Chatbots, AI assistants, AI tools | AI SDK v6, streamText, useChat, chat history |
 | **plugin_host** | iOS plugin host apps | Plugin registry, shared services, dynamic TabView |
 | **plugin_module** | Swift Package plugins | NCBSPlugin protocol, MVVM, compressed storage |
 
@@ -377,7 +406,7 @@ Arguments:
 
 Options:
   --project-dir DIR         Project directory (default: ./projects/new-product)
-  --stack STACK             Force stack: nextjs-supabase, nextjs-prisma, rails, expo-supabase, swift-swiftui
+  --stack STACK             Force stack: nextjs-supabase, nextjs-prisma, rails, django-htmx, sveltekit, astro, expo-supabase, swift-swiftui
   --mode MODE               Build mode: standard, host, plugin
   --checkpoints             Enable checkpoints for human approval
   --resume                  Resume from most recent checkpoint
@@ -405,23 +434,25 @@ The agent includes safety hooks that:
 
 | Version | Description |
 |---------|-------------|
-| v1.0 | 12,000+ lines of markdown instructions, 26 templates |
-| v2.0 | Simplified to 770 lines, 4 templates, 3 checkpoints |
-| v3.0 | Autonomous agent using Claude Code SDK |
-| v4.0 | Stack selection, design review, iteration limits |
-| v5.0 | Deployment validation, verification, checkpoints |
-| v5.1 | Automated testing, tester agent, test templates |
-| v6.0 | Spec audit, prompt passthrough, enricher agent, content site domain |
-| v7.0 | Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest |
-| **v10.0** | **Post-mortem fixes: dependency audit, data wiring verification, RLS circular dep prevention, CRITICAL override, quality scoring penalty, 1439 tests** |
-| v9.1 | Crash recovery: `--resume` in v8+ mode, atomic checkpoints, artifact verification |
-| v9.0 | Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning |
+| **v11.1** | **AI app domain, CI/CD generation, Vercel Analytics observability** |
+| **v11.0** | **3 new stacks: Django+HTMX, SvelteKit, Astro. 8 stacks total** |
+| v10.3 | Template modernization: Next.js 16 patterns, async APIs, Cache Components |
+| v10.2 | Enhancement mode fully wired into pipeline |
+| v10.1 | Audit fixes: version, template bugs, test coverage |
+| v10.0 | Post-mortem fixes: dependency audit, data wiring, RLS circular deps, CRITICAL override |
+| v9.1 | Crash recovery: `--resume`, atomic checkpoints, artifact verification |
+| v9.0 | Reliability overhaul: quality scoring, YAML contracts, SDK logging, timeouts |
 | v8.0 | Phase-by-phase orchestration, build memory, quality scoring, public API |
+| v7.0 | Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest |
+| v6.0 | Spec audit, prompt enrichment, content site domain |
+| v5.0 | Deployment validation, verification, checkpoints, automated testing |
 
 ## Requirements
 
 - Python 3.10+
 - Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
 - Claude Pro subscription
-- Node.js 18+ (for generated web apps)
+- Node.js 20+ (for generated web apps)
 - Swift 5.9+ / Xcode 15+ (for Swift/SwiftUI builds)
+- Ruby 3.1+ / Rails 7+ (for Rails builds)
+- Python 3.10+ (for Django builds)
