@@ -65,12 +65,25 @@ async def _run_phase_impl(
     start_time = time.time()
     result_text_parts: list[str] = []
 
+    # Strip ANTHROPIC_API_KEY from the subprocess environment so the Claude CLI
+    # uses the user's Pro/Max subscription (interactive OAuth) instead of the
+    # direct API (pay-per-token). The SDK inherits os.environ by default, so if
+    # the user has ANTHROPIC_API_KEY in their shell profile, every build charges
+    # the API directly — which can cost $10-20 for complex builds.
+    # Setting it to empty string in the env override effectively removes it.
+    import os as _os
+    use_api_key = _os.environ.get("PRODUCT_AGENT_USE_API_KEY", "").lower() == "true"
+    env_overrides = {}
+    if not use_api_key:
+        env_overrides["ANTHROPIC_API_KEY"] = ""  # Force Pro subscription usage
+
     options = ClaudeCodeOptions(
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
         max_turns=max_turns,
         cwd=cwd,
         permission_mode="bypassPermissions",
+        env=env_overrides,
     )
     if model:
         options.model = model
