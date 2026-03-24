@@ -42,6 +42,10 @@ def analyze_product_idea(idea: str) -> dict:
         "api_backend": ["api", "backend", "rest api", "graphql"],
         "docs_site": ["documentation", "docs site", "developer docs", "api docs"],
         "interactive_app": ["interactive", "single page", "spa"],
+        # v11.0: AI-powered app types
+        "ai_app": ["ai app", "ai-powered", "ai tool", "llm", "gpt", "claude"],
+        "chatbot": ["chatbot", "chat bot", "ai chat", "conversational"],
+        "ai_assistant": ["ai assistant", "copilot", "ai helper"],
         # v7.0: Native iOS types
         "ios_app": ["swift", "swiftui", "ios", "iphone", "ipad", "xcode", "native ios"],
         "plugin_module": ["plugin", "plug-in", "feature module", "swift package", "module"],

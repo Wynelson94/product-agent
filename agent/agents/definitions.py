@@ -694,6 +694,23 @@ xcodebuild -exportArchive \
 ```
 If archive/export fails due to signing, report it as a manual step — the build and tests still validate the code.
 
+## Post-Deployment Setup (v11.0)
+
+After successful deployment, set up observability and CI/CD if the stack supports it:
+
+### Observability (Next.js / SvelteKit on Vercel)
+If the project uses Next.js, install Vercel Analytics and Speed Insights:
+```bash
+npm install @vercel/analytics @vercel/speed-insights
+```
+Then add `<Analytics />` and `<SpeedInsights />` to the root layout.
+Skip this for non-Vercel deployments (Rails/Railway, Expo, Swift).
+
+### CI/CD (GitHub Actions)
+If a `.git` directory exists and the stack deploys to Vercel or Railway,
+generate `.github/workflows/ci.yml` with build + test steps.
+See the stack-specific deploy template for the exact workflow YAML.
+
 ## Verification Checklist
 
 After deployment, verify basic connectivity:

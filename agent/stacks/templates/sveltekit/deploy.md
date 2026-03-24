@@ -72,6 +72,31 @@ export const GET = async () => {
 }
 ```
 
+## GitHub Actions CI/CD (Optional)
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+      - run: cd src && npm ci
+      - run: cd src && npm run build
+      - run: cd src && npm test
+```
+
 ## Troubleshooting
 
 ### Build fails with adapter error

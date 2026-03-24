@@ -198,6 +198,12 @@ PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
     "api_backend": ["django-htmx", "rails"],
     "interactive_app": ["sveltekit", "nextjs-supabase"],
 
+    # v11.0: AI-powered apps
+    "ai_app": ["nextjs-supabase", "nextjs-prisma", "sveltekit"],
+    "chatbot": ["nextjs-supabase", "nextjs-prisma"],
+    "ai_assistant": ["nextjs-supabase", "nextjs-prisma"],
+    "ai_tool": ["nextjs-supabase", "sveltekit"],
+
     # Native iOS (v7.0)
     "ios_app": ["swift-swiftui"],
     "plugin_module": ["swift-swiftui"],

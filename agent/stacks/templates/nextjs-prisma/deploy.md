@@ -117,6 +117,55 @@ Check these:
 - Database operations succeed
 - API routes respond correctly
 
+## Observability (Recommended)
+
+Add Vercel Analytics and Speed Insights for production monitoring:
+
+```bash
+npm install @vercel/analytics @vercel/speed-insights
+```
+
+```typescript
+// app/layout.tsx — add inside <body>
+import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/next'
+
+// Inside the layout JSX:
+<body>
+  {children}
+  <Analytics />
+  <SpeedInsights />
+</body>
+```
+
+## GitHub Actions CI/CD (Optional)
+
+Generate `.github/workflows/ci.yml` for automated testing on pull requests:
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/package-lock.json
+      - run: cd src && npm ci
+      - run: cd src && npx prisma generate
+      - run: cd src && npm run build
+      - run: cd src && npm test
+```
+
 ## Troubleshooting
 
 ### "PrismaClient is not initialized"
