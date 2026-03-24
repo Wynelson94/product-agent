@@ -207,6 +207,7 @@ from . import (  # noqa: E402, F401
     analyze,
     design,
     review,
+    enhance,
     build,
     audit,
     test,

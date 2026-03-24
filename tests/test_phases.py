@@ -27,6 +27,7 @@ REGISTERED_PHASES = [
     Phase.ANALYSIS,
     Phase.DESIGN,
     Phase.REVIEW,
+    Phase.ENHANCE,
     Phase.BUILD,
     Phase.AUDIT,
     Phase.TEST,
@@ -39,6 +40,7 @@ EXPECTED_AGENT_NAMES = {
     Phase.ANALYSIS: "analyzer",
     Phase.DESIGN: "designer",
     Phase.REVIEW: "reviewer",
+    Phase.ENHANCE: "enhancer",
     Phase.BUILD: "builder",
     Phase.AUDIT: "auditor",
     Phase.TEST: "tester",
@@ -51,6 +53,7 @@ EXPECTED_MAX_TURNS = {
     Phase.ANALYSIS: 15,
     Phase.DESIGN: 25,
     Phase.REVIEW: 15,
+    Phase.ENHANCE: 40,
     Phase.BUILD: 80,
     Phase.AUDIT: 20,
     Phase.TEST: 30,
@@ -63,6 +66,7 @@ EXPECTED_MAX_RETRIES = {
     Phase.ANALYSIS: 1,
     Phase.DESIGN: 0,
     Phase.REVIEW: 0,
+    Phase.ENHANCE: 1,
     Phase.BUILD: 4,
     Phase.AUDIT: 0,
     Phase.TEST: 2,
@@ -106,9 +110,9 @@ def _make_validation(passed: bool = True) -> ValidationResult:
 class TestPhaseRegistration:
     """Verify that importing agent.phases registers all 9 phases."""
 
-    def test_all_nine_phases_registered(self):
+    def test_all_ten_phases_registered(self):
         configs = get_all_phase_configs()
-        assert len(configs) == 9
+        assert len(configs) == 10
 
     @pytest.mark.parametrize("phase", REGISTERED_PHASES)
     def test_phase_is_registered(self, phase):

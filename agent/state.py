@@ -20,6 +20,7 @@ class Phase(Enum):
     ANALYSIS = "analysis"
     DESIGN = "design"
     REVIEW = "review"
+    ENHANCE = "enhance"  # v10.2: Enhancement mode — modify existing design with new features
     BUILD = "build"
     AUDIT = "audit"  # v6.0: Spec audit — verify build matches original prompt
     TEST = "test"  # v5.1: Test generation and execution

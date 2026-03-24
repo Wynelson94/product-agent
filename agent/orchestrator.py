@@ -135,9 +135,12 @@ async def build_product(
     # v9.0: Track total turns across all phases
     total_turns = 0
 
-    # Handle enhancement mode setup
+    # Handle enhancement mode setup — copies existing design, infers stack
     if cfg.mode == "enhancement" and cfg.design_file:
         _setup_enhancement_mode(state, cfg, project_path)
+
+    # v10.2: Track whether we're in enhancement mode for phase skipping
+    is_enhancement = cfg.mode == "enhancement"
 
     def _track_turns(call_result: PhaseCallResult) -> None:
         """Accumulate turns and raise if limit exceeded."""
@@ -180,7 +183,10 @@ async def build_product(
         # --- Phase 2: Analysis ---
         # Selects the best tech stack for the product idea. Fatal if it fails
         # because all subsequent phases depend on knowing the stack.
-        if cfg.resume and _should_skip_phase(state, Phase.ANALYSIS, project_path):
+        # In enhancement mode, stack is already set by _setup_enhancement_mode.
+        if is_enhancement:
+            progress.phase_skipped("Analysis", f"stack: {state.stack_id} (enhancement)")
+        elif cfg.resume and _should_skip_phase(state, Phase.ANALYSIS, project_path):
             progress.phase_skipped("Analysis", f"stack: {state.stack_id}")
         else:
             call, validation = await run_phase(
@@ -203,7 +209,27 @@ async def build_product(
         # Design creates DESIGN.md, Review validates it. If NEEDS_REVISION,
         # we loop back to Design (up to max_revisions times). This catches
         # architectural issues before the expensive Build phase.
-        if cfg.resume and _should_skip_phase(state, Phase.REVIEW, project_path):
+        # In enhancement mode, we skip Design+Review and run Enhance instead.
+        if is_enhancement:
+            progress.phase_skipped("Design", "using existing design (enhancement)")
+            progress.phase_skipped("Review", "skipped (enhancement)")
+
+            # --- Enhancement Phase ---
+            # Runs the enhancer agent to modify DESIGN.md with new features.
+            if cfg.resume and _should_skip_phase(state, Phase.ENHANCE, project_path):
+                progress.phase_skipped("Enhance", "already applied")
+            else:
+                call, enhance_validation = await run_phase(
+                    Phase.ENHANCE, state, project_path, progress
+                )
+                _track_turns(call)
+                if not call.success:
+                    return _build_failed(progress, "Enhancement failed", call.error)
+
+                state.transition_to(Phase.ENHANCE, "Design enhanced")
+                checkpoint_mgr.save(state)
+
+        elif cfg.resume and _should_skip_phase(state, Phase.REVIEW, project_path):
             progress.phase_skipped("Design", f"revision {state.design_revision}")
             progress.phase_skipped("Review", "approved")
         else:
@@ -513,7 +539,8 @@ def _get_phase_count(cfg: BuildConfig) -> int:
     if cfg.enrich:
         base += 1  # add enrichment
     if cfg.mode == "enhancement":
-        base -= 1  # no analysis phase in enhancement
+        # Enhancement: skip analysis + design + review (-3), add enhance (+1) = net -2
+        base -= 2
     return base
 
 
@@ -588,6 +615,7 @@ _PHASE_ORDER: dict[Phase, int] = {
     Phase.ANALYSIS: 2,
     Phase.DESIGN: 3,
     Phase.REVIEW: 4,
+    Phase.ENHANCE: 4,  # Same order as REVIEW — replaces Design+Review in enhancement mode
     Phase.BUILD: 5,
     Phase.AUDIT: 6,
     Phase.TEST: 6,  # Same order as AUDIT — they run in parallel
@@ -639,6 +667,10 @@ def _artifact_exists(target: Phase, project_path: Path, state: AgentState) -> bo
 
     if target == Phase.REVIEW:
         return (project_path / "DESIGN.md").exists()
+
+    if target == Phase.ENHANCE:
+        # Enhancement is done if DESIGN.md exists and state shows enhancement mode
+        return state.enhancement_mode and (project_path / "DESIGN.md").exists()
 
     if target == Phase.BUILD:
         return _has_source_code(project_path)

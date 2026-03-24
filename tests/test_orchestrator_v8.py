@@ -234,13 +234,14 @@ class TestGetPhaseCount:
         cfg = BuildConfig(enrich=True)
         assert _get_phase_count(cfg) == 10
 
-    def test_enhancement_mode_returns_8(self):
+    def test_enhancement_mode_returns_7(self):
+        # Enhancement: skip analysis + design + review (-3), add enhance (+1) = 9 - 2 = 7
         cfg = BuildConfig(mode="enhancement")
-        assert _get_phase_count(cfg) == 8
+        assert _get_phase_count(cfg) == 7
 
-    def test_enhancement_with_enrich_returns_9(self):
+    def test_enhancement_with_enrich_returns_8(self):
         cfg = BuildConfig(mode="enhancement", enrich=True)
-        assert _get_phase_count(cfg) == 9
+        assert _get_phase_count(cfg) == 8
 
     def test_plugin_mode_returns_9(self):
         cfg = BuildConfig(mode="plugin")

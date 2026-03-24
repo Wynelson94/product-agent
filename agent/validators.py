@@ -104,6 +104,7 @@ def validate_phase_output(phase: Phase, project_dir: str | Path) -> ValidationRe
         Phase.ANALYSIS: _validate_analysis,
         Phase.DESIGN: _validate_design,
         Phase.REVIEW: _validate_review,
+        Phase.ENHANCE: _validate_enhance,
         Phase.BUILD: _validate_build,
         Phase.AUDIT: _validate_audit,
         Phase.TEST: _validate_test,
@@ -134,6 +135,43 @@ def _validate_enrich(project_dir: Path) -> ValidationResult:
         result.add_error(f"PROMPT.md too short ({len(content)} chars) — enrichment may have failed")
 
     result.add_info(f"PROMPT.md exists ({len(content)} chars)")
+    return result
+
+
+def _validate_enhance(project_dir: Path) -> ValidationResult:
+    """Validate enhancer output: DESIGN.md exists and was updated with new features.
+
+    Checks that DESIGN.md exists and contains evidence of enhancement (the enhancer
+    agent marks additions with '(NEW)' or updates the front-matter counts).
+    """
+    result = ValidationResult(passed=True, phase=Phase.ENHANCE)
+    design_md = project_dir / "DESIGN.md"
+
+    if not design_md.exists():
+        result.add_error("DESIGN.md not found — enhancer must update the existing design")
+        return result
+
+    content = design_md.read_text()
+    if len(content) < 200:
+        result.add_error(f"DESIGN.md too short ({len(content)} chars) — enhancement may have failed")
+        return result
+
+    # Check for evidence of enhancement: (NEW) markers or increased content
+    has_new_markers = "(NEW)" in content or "(new)" in content
+    has_enhanced_marker = "enhanced" in content.lower() or "enhancement" in content.lower()
+
+    if has_new_markers:
+        # Count how many new items were added
+        new_count = content.lower().count("(new)")
+        result.extracted["new_items"] = new_count
+        result.add_info(f"DESIGN.md enhanced with {new_count} new item(s)")
+    elif has_enhanced_marker:
+        result.add_info("DESIGN.md shows evidence of enhancement")
+    else:
+        # Not a failure — the enhancer may have updated without explicit markers
+        result.add_info("WARNING: No (NEW) markers found in DESIGN.md — verify enhancement was applied")
+
+    result.add_info(f"DESIGN.md exists ({len(content)} chars)")
     return result
 
 
