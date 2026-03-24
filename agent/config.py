@@ -95,8 +95,14 @@ SWIFT_MIN_TESTS_HOST = int(get_env("SWIFT_MIN_TESTS_HOST", "15"))      # Minimum
 # v9.0: Phase timeouts — prevents runaway SDK calls from hanging indefinitely.
 # Build phase gets extra time because it does the most work (scaffolding + coding).
 PHASE_TIMEOUT_S = int(get_env("PHASE_TIMEOUT_S", "600"))          # 10 min default for most phases
-BUILD_PHASE_TIMEOUT_S = int(get_env("BUILD_PHASE_TIMEOUT_S", "900"))  # 15 min for build phase
+BUILD_PHASE_TIMEOUT_S = int(get_env("BUILD_PHASE_TIMEOUT_S", "900"))  # 15 min base for build phase
 MAX_TOTAL_TURNS = int(get_env("MAX_TOTAL_TURNS", "300"))          # Global turn cap across ALL phases
+
+# v12.0: Dynamic build timeout — extra seconds per table over 8.
+# Complex apps (10+ tables) need more build time. The orchestrator calculates:
+# effective_timeout = BUILD_PHASE_TIMEOUT_S + max(0, table_count - 8) * BUILD_TIMEOUT_PER_TABLE_S
+# Example: 12 tables → 900 + 4*120 = 1380s (23 min)
+BUILD_TIMEOUT_PER_TABLE_S = int(get_env("BUILD_TIMEOUT_PER_TABLE_S", "120"))
 
 # v9.1: Crash recovery — verify artifact SHA-256 hashes on --resume
 ENABLE_ARTIFACT_VERIFICATION = get_env("ENABLE_ARTIFACT_VERIFICATION", "true").lower() == "true"

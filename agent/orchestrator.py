@@ -94,6 +94,13 @@ async def build_product(
     project_path = Path(project_dir).resolve()
     project_path.mkdir(parents=True, exist_ok=True)
 
+    # v12.0: Clean project directory on fresh builds to prevent contamination
+    # from previous builds. Stale files (SPEC_AUDIT.md, package.json) from a
+    # prior build caused the auditor to audit the wrong project in the v11.1
+    # stress test. Preserves checkpoint and log dirs so --resume still works.
+    if not cfg.resume:
+        _clean_project_dir(project_path)
+
     # v9.0: Sanitize user input before it enters any prompts
     idea = sanitize_idea(idea)
 
@@ -273,9 +280,22 @@ async def build_product(
                 state.transition_to(Phase.DESIGN, f"Revision {revision}")
                 checkpoint_mgr.save(state)
 
-                # Review
+                # Review — on the final revision, inject lenient context so the
+                # reviewer only blocks on CRITICAL structural issues. This prevents
+                # wasting 20+ minutes on non-blocking recommendations that the builder
+                # can handle anyway. v12.0: stress test showed 3 NEEDS_REVISION passes
+                # with the final one blocking on a minor RLS recommendation.
+                review_context = None
+                if revision == max_revisions:
+                    review_context = (
+                        "FINAL REVIEW: Only block on CRITICAL structural issues "
+                        "(missing tables, broken relationships, security holes). "
+                        "Non-blocking recommendations should be noted but the design "
+                        "should be APPROVED so the build can proceed."
+                    )
                 call, review_validation = await run_phase(
-                    Phase.REVIEW, state, project_path, progress
+                    Phase.REVIEW, state, project_path, progress,
+                    retry_context=review_context,
                 )
                 _track_turns(call)
                 if not call.success:
@@ -301,6 +321,16 @@ async def build_product(
         # The builder implements the full application. If it fails, the error
         # message is injected into the next attempt's prompt so Claude can
         # learn from the specific failure (missing imports, wrong patterns, etc.)
+        #
+        # v12.0: Dynamic timeout — complex apps with many tables get more time.
+        # Base timeout is BUILD_PHASE_TIMEOUT_S (900s). Each table over 8 adds
+        # BUILD_TIMEOUT_PER_TABLE_S (120s). A 12-table app gets 900 + 4*120 = 1380s.
+        table_count = _count_design_tables(project_path)
+        extra_time = max(0, table_count - 8) * int(
+            getattr(config, 'BUILD_TIMEOUT_PER_TABLE_S', 120)
+        )
+        dynamic_build_timeout = config.BUILD_PHASE_TIMEOUT_S + extra_time
+
         if cfg.resume and _should_skip_phase(state, Phase.BUILD, project_path):
             progress.phase_skipped("Build", f"{state.build_attempts} attempt(s)")
         else:
@@ -322,6 +352,7 @@ async def build_product(
                 call, validation = await run_phase(
                     Phase.BUILD, state, project_path, progress,
                     retry_context=retry_context,
+                    timeout_override=dynamic_build_timeout,
                 )
                 _track_turns(call)
 
@@ -758,3 +789,42 @@ def _has_source_code(project_path: Path) -> bool:
         if d.exists() and any(d.rglob("*.*")):
             return True
     return False
+
+
+def _clean_project_dir(project_path: Path) -> None:
+    """Remove stale files from a previous build before starting fresh.
+
+    v12.0: Prevents contamination where the auditor audits files from a
+    previous build (e.g., "Feedbase" SPEC_AUDIT.md in a ProServ build).
+    Preserves .agent_checkpoints/ and .agent_logs/ so --resume still works.
+    Also preserves hidden dirs (.git, etc.) and the dir itself.
+    """
+    # Directories to preserve — checkpoints for resume, logs for debugging
+    preserve_dirs = {".agent_checkpoints", ".agent_logs", ".git"}
+
+    for item in project_path.iterdir():
+        if item.name in preserve_dirs:
+            continue
+        if item.is_dir():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            item.unlink(missing_ok=True)
+
+
+def _count_design_tables(project_path: Path) -> int:
+    """Count the number of data model tables/models in DESIGN.md.
+
+    v12.0: Used to calculate dynamic build timeouts — complex apps with
+    many tables need more time to scaffold and implement.
+
+    Counts Prisma 'model X {' lines and Supabase 'create table' lines.
+    Returns 0 if DESIGN.md doesn't exist or has no recognizable models.
+    """
+    design_file = project_path / "DESIGN.md"
+    if not design_file.exists():
+        return 0
+    content = design_file.read_text()
+    # Count Prisma models (most common) and SQL create tables
+    prisma_count = len(re.findall(r'^model\s+\w+', content, re.MULTILINE))
+    sql_count = len(re.findall(r'create\s+table', content, re.IGNORECASE))
+    return max(prisma_count, sql_count)

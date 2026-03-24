@@ -63,6 +63,7 @@ async def run_phase(
     project_dir: Path,
     progress: ProgressReporter,
     retry_context: str | None = None,
+    timeout_override: int | None = None,
 ) -> tuple[PhaseCallResult, ValidationResult]:
     """Execute a single phase with validation and progress reporting.
 
@@ -72,6 +73,8 @@ async def run_phase(
         project_dir: Project directory path
         progress: Progress reporter for real-time output
         retry_context: Optional error context from a previous failed attempt
+        timeout_override: Optional timeout in seconds (overrides PhaseConfig.timeout_s).
+            v12.0: Used for dynamic build timeouts based on DESIGN.md complexity.
 
     Returns:
         Tuple of (PhaseCallResult, ValidationResult)
@@ -107,7 +110,8 @@ Fix the issue and try a different approach. Do NOT repeat the same mistake.
         build_mode=state.build_mode,
     )
 
-    # Run the phase
+    # Run the phase — timeout_override takes priority over PhaseConfig.timeout_s
+    effective_timeout = timeout_override if timeout_override is not None else config.timeout_s
     call_result = await run_phase_call(
         prompt=prompt,
         system_prompt=system_prompt,
@@ -115,7 +119,7 @@ Fix the issue and try a different approach. Do NOT repeat the same mistake.
         cwd=project_dir,
         max_turns=config.max_turns,
         model=config.model,
-        timeout_s=config.timeout_s,
+        timeout_s=effective_timeout,
     )
 
     # Log prompt, system prompt, and response for debuggability

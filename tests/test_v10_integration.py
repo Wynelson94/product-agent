@@ -133,7 +133,7 @@ def _mock_run_phase_factory(
     Returns different (PhaseCallResult, ValidationResult) based on which
     phase is being run, simulating a full pipeline.
     """
-    async def mock_run_phase(phase, state, project_dir, progress, retry_context=None):
+    async def mock_run_phase(phase, state, project_dir, progress, retry_context=None, timeout_override=None):
         call = _make_call_result()
 
         if phase == Phase.ANALYSIS:

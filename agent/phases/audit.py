@@ -7,11 +7,19 @@ from . import PhaseConfig, register_phase
 
 
 def _build_prompt(state: AgentState, project_dir: Path) -> str:
-    """Build the auditor task prompt."""
+    """Build the auditor task prompt.
+
+    v12.0: Added identity verification step. The auditor must first confirm
+    the built code matches the current prompt — prevents auditing stale files
+    from a previous build that contaminated the project directory.
+    """
     parts = ["Audit the built application against the original requirements."]
 
     parts.append(f"\nProject directory: {project_dir}")
-    parts.append("\n1. Read ORIGINAL_PROMPT.md for the original requirements")
+    # v12.0: Identity check must be step 1 — catches directory contamination early
+    parts.append("\n1. Read ORIGINAL_PROMPT.md and verify the built application matches this prompt.")
+    parts.append("   If the codebase appears to be a DIFFERENT application than described in ORIGINAL_PROMPT.md,")
+    parts.append("   report this as a CRITICAL discrepancy immediately.")
     parts.append("2. Read DESIGN.md for the planned architecture")
     parts.append("3. Scan all source files to verify implementation matches requirements")
     parts.append("4. Create SPEC_AUDIT.md with your findings")
