@@ -3,7 +3,7 @@
 ## Initial Setup
 
 ```bash
-# Create Rails app with PostgreSQL
+# Create Rails 7+ app with PostgreSQL and Tailwind CSS
 rails new src --database=postgresql --css=tailwind --skip-test --skip-jbuilder
 
 cd src

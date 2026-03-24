@@ -61,7 +61,9 @@ struct ItemListView: View {
 ### State Management
 
 ```swift
-// Use @Observable for view models (iOS 17+)
+import SwiftUI  // Includes @Observable macro (iOS 17+)
+// IMPORTANT: Use @Observable, NOT ObservableObject + @Published.
+// @Published will compile but views won't update — a silent bug.
 @Observable
 final class ItemListViewModel {
     var items: [Item] = []

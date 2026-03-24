@@ -2,7 +2,7 @@
 
 ## Steps
 
-1. Scaffold: `npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"`
+1. Scaffold: `npx create-next-app@latest . --yes --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --turbopack --use-npm`
 2. Install: `npm install prisma @prisma/client next-auth@latest @auth/prisma-adapter`
 3. **Validate peer dependencies**: Run `npm ls --all 2>&1 | grep "peer dep"` — if any conflicts, fix versions before continuing
 4. Run: `npx prisma init`

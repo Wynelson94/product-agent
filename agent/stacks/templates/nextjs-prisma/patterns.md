@@ -527,3 +527,63 @@ const transfer = await prisma.$transaction(async (tx) => {
   })
 })
 ```
+
+## Next.js 16 Patterns
+
+### Async Request APIs
+
+All request-scoped APIs are async in Next.js 16. Always await them:
+
+```typescript
+import { cookies, headers } from 'next/headers'
+
+export default async function Page({ params, searchParams }: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ q?: string }>
+}) {
+  const { id } = await params
+  const { q } = await searchParams
+  const cookieStore = await cookies()
+  // ...
+}
+```
+
+### Cache Components ('use cache')
+
+Cache expensive Prisma queries at the component level:
+
+```typescript
+'use cache'
+
+import { cacheLife, cacheTag } from 'next/cache'
+import { prisma } from '@/lib/prisma'
+
+export async function CachedUserList() {
+  cacheLife('hours')
+  cacheTag('users')
+
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+  })
+
+  return <UserList users={users} />
+}
+```
+
+Invalidate from Server Actions:
+
+```typescript
+'use server'
+import { revalidateTag } from 'next/cache'
+
+export async function createUser(formData: FormData) {
+  // ... create user ...
+  revalidateTag('users', 'max')
+}
+```
+
+### Proxy (formerly Middleware)
+
+In Next.js 16, `middleware.ts` is renamed to `proxy.ts`. Place it at `src/proxy.ts`
+(same level as `app/`). The API is the same — just rename the file. Proxy runs on
+Node.js runtime only (no Edge runtime).

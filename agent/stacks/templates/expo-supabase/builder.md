@@ -3,7 +3,8 @@
 ## Steps
 
 1. Scaffold: `npx create-expo-app . --template tabs`
-2. Install Supabase and navigation dependencies
+2. Install Expo Router: `npx expo install expo-router expo-linking expo-constants`
+3. Install Supabase and navigation dependencies
 3. **Setup Tests**: `npm install -D jest @testing-library/react-native @testing-library/jest-native jest-expo`
 4. Create jest.config.js and jest.setup.js
 5. **CRITICAL**: Create `babel.config.js` with `import.meta.env` → `process.env` transform (see scaffold template). Without this, the web bundle will silently fail — pages render but no click handlers work.

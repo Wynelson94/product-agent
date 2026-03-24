@@ -426,3 +426,61 @@ This pattern appears when a table (typically `profiles` or `users`) stores BOTH:
 
 The SELECT policy needs to look up the user's org, but that lookup itself
 requires a SELECT on the same table — creating the circular dependency.
+
+## Next.js 16 Patterns
+
+### Async Request APIs
+
+All request-scoped APIs are async in Next.js 16. Always await them:
+
+```typescript
+// CORRECT — Next.js 16
+import { cookies, headers } from 'next/headers'
+
+export default async function Page({ params, searchParams }: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ q?: string }>
+}) {
+  const { id } = await params
+  const { q } = await searchParams
+  const cookieStore = await cookies()
+  const headerList = await headers()
+  // ...
+}
+```
+
+### Cache Components ('use cache')
+
+Use Cache Components to cache expensive operations at the component or function level:
+
+```typescript
+'use cache'
+
+import { cacheLife, cacheTag } from 'next/cache'
+
+export async function CachedItemList({ userId }: { userId: string }) {
+  cacheLife('hours')            // Cache for hours
+  cacheTag(`items-${userId}`)   // Tag for on-demand invalidation
+
+  const supabase = await createClient()
+  const { data: items } = await supabase
+    .from('items')
+    .select('*')
+    .eq('user_id', userId)
+
+  return <ItemList items={items ?? []} />
+}
+```
+
+Invalidate from Server Actions:
+
+```typescript
+'use server'
+import { revalidateTag } from 'next/cache'
+
+export async function createItem(formData: FormData) {
+  const supabase = await createClient()
+  // ... insert item ...
+  revalidateTag(`items-${userId}`, 'max')  // Stale-while-revalidate
+}
+```

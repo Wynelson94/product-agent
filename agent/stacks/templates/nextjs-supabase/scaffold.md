@@ -3,8 +3,8 @@
 ## Initial Setup
 
 ```bash
-# Create Next.js app
-npx create-next-app@latest src --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"
+# Create Next.js app (--yes skips interactive prompts, --turbopack enables fast bundler)
+npx create-next-app@latest src --yes --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --turbopack --use-npm
 
 cd src
 
@@ -48,7 +48,7 @@ src/
 │   └── utils.ts
 ├── types/
 │   └── database.ts   # Supabase generated types
-└── middleware.ts
+└── middleware.ts      # Next.js 16+: rename to proxy.ts (Node.js runtime only)
 ```
 
 ## Route Groups and Root Page
