@@ -248,12 +248,15 @@ class TestCriteriaHelpers:
         assert stack.id == "swift-swiftui"
         assert stack.name == "Swift + SwiftUI"
 
-    def test_list_stacks_returns_five(self):
-        """Test that list_stacks returns all 5 stacks."""
+    def test_list_stacks_returns_all(self):
+        """Test that list_stacks returns all 8 stacks."""
         stacks = list_stacks()
-        assert len(stacks) == 5
+        assert len(stacks) == 8
         ids = {s.id for s in stacks}
-        assert ids == {"nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui"}
+        assert ids == {
+            "nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui",
+            "django-htmx", "sveltekit", "astro",
+        }
 
     def test_deployment_compat_vercel_postgresql(self):
         """Test that nextjs-supabase + vercel + postgresql is compatible."""

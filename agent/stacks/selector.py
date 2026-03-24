@@ -37,6 +37,11 @@ def analyze_product_idea(idea: str) -> dict:
         "nonprofit": ["nonprofit", "non-profit", "charity", "donation", "volunteer", "foundation"],
         "portfolio": ["portfolio", "personal site", "showcase"],
         "event_site": ["trips", "events", "schedule", "itinerary", "tours"],
+        # v11.0: New stack types
+        "data_app": ["data app", "data platform", "data tool", "analytics platform"],
+        "api_backend": ["api", "backend", "rest api", "graphql"],
+        "docs_site": ["documentation", "docs site", "developer docs", "api docs"],
+        "interactive_app": ["interactive", "single page", "spa"],
         # v7.0: Native iOS types
         "ios_app": ["swift", "swiftui", "ios", "iphone", "ipad", "xcode", "native ios"],
         "plugin_module": ["plugin", "plug-in", "feature module", "swift package", "module"],
@@ -63,6 +68,13 @@ def analyze_product_idea(idea: str) -> dict:
         "compression": ["compression", "compress", "lossless", "decompress"],
         "swift_packages": ["swift package", "spm", "package.swift"],
         "swiftdata": ["swiftdata", "swift data", "persistent model"],
+        # v11.0: Framework-specific features
+        "htmx": ["htmx", "django", "python web"],
+        "orm": ["orm", "django", "prisma"],
+        "islands": ["islands", "partial hydration"],
+        "markdown": ["markdown", "mdx", "content-driven"],
+        "static_generation": ["static site", "static generation", "jamstack"],
+        "form_actions": ["svelte", "sveltekit"],
     }
 
     for feature, keywords in feature_keywords.items():

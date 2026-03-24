@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-StackId = Literal["nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui"]
+StackId = Literal[
+    "nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui",
+    "django-htmx", "sveltekit", "astro",  # v11.0: New stacks
+]
 
 
 @dataclass
@@ -117,16 +120,55 @@ STACKS: dict[StackId, StackDefinition] = {
         incompatible_databases=[],  # Local storage is native to iOS
         required_env_vars=[],  # No env vars required for Swift builds
     ),
+    # v11.0: Django + HTMX — Python web with server-rendered interactivity
+    "django-htmx": StackDefinition(
+        id="django-htmx",
+        name="Django + HTMX",
+        description="Python web framework with server-rendered interactivity. Best for data-heavy apps, admin panels, and Python-native teams.",
+        product_types=["admin_panel", "data_app", "internal_tool", "api_backend", "rapid_prototype"],
+        features=["admin_interface", "background_jobs", "orm", "auth", "rest_api", "htmx"],
+        complexity="medium",
+        deployment="railway",
+        deployment_type="traditional",
+        incompatible_databases=[],
+        required_env_vars=["DATABASE_URL", "DJANGO_SECRET_KEY"],
+    ),
+    # v11.0: SvelteKit — lightweight modern JS alternative
+    "sveltekit": StackDefinition(
+        id="sveltekit",
+        name="SvelteKit",
+        description="Lightweight modern JS framework with excellent DX. Best for fast, interactive web apps with less boilerplate than React.",
+        product_types=["saas", "dashboard", "landing_page", "interactive_app", "rapid_prototype"],
+        features=["ssr", "auth", "form_actions", "api_routes", "progressive_enhancement"],
+        complexity="low-medium",
+        deployment="vercel",
+        deployment_type="serverless",
+        incompatible_databases=["sqlite", "file-based"],
+        required_env_vars=[],
+    ),
+    # v11.0: Astro — content-first with islands architecture
+    "astro": StackDefinition(
+        id="astro",
+        name="Astro",
+        description="Content-first framework with islands architecture. Best for blogs, docs, marketing sites, and content-heavy pages with minimal JS.",
+        product_types=["content_site", "blog", "docs_site", "landing_page", "marketing_site", "portfolio"],
+        features=["static_generation", "islands", "markdown", "cms_integration", "zero_js_default"],
+        complexity="low",
+        deployment="vercel",
+        deployment_type="serverless",
+        incompatible_databases=["sqlite", "file-based"],
+        required_env_vars=[],
+    ),
 }
 
 
 # Product type to stack mapping (primary recommendations)
 PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
     # SaaS and tools
-    "saas": ["nextjs-supabase", "nextjs-prisma"],
-    "internal_tool": ["nextjs-supabase", "rails"],
-    "dashboard": ["nextjs-supabase"],
-    "admin_panel": ["rails", "nextjs-supabase"],
+    "saas": ["nextjs-supabase", "nextjs-prisma", "sveltekit"],
+    "internal_tool": ["nextjs-supabase", "django-htmx", "rails"],
+    "dashboard": ["nextjs-supabase", "sveltekit"],
+    "admin_panel": ["django-htmx", "rails", "nextjs-supabase"],
 
     # Marketplaces and platforms
     "marketplace": ["nextjs-prisma", "rails"],
@@ -139,16 +181,22 @@ PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
     "consumer_app": ["expo-supabase", "nextjs-supabase"],
 
     # Content and simple
-    "landing_page": ["nextjs-supabase"],
-    "blog": ["nextjs-supabase", "rails"],
-    "rapid_prototype": ["rails", "nextjs-supabase"],
+    "landing_page": ["astro", "nextjs-supabase", "sveltekit"],
+    "blog": ["astro", "nextjs-supabase", "rails"],
+    "rapid_prototype": ["sveltekit", "rails", "nextjs-supabase"],
 
-    # Content sites (v6.0)
-    "content_site": ["nextjs-supabase"],
-    "nonprofit": ["nextjs-supabase"],
-    "portfolio": ["nextjs-supabase"],
-    "marketing_site": ["nextjs-supabase"],
-    "event_site": ["nextjs-supabase"],
+    # Content sites (v6.0 + v11.0)
+    "content_site": ["astro", "nextjs-supabase"],
+    "nonprofit": ["astro", "nextjs-supabase"],
+    "portfolio": ["astro", "nextjs-supabase"],
+    "marketing_site": ["astro", "nextjs-supabase"],
+    "event_site": ["nextjs-supabase", "astro"],
+    "docs_site": ["astro"],
+
+    # v11.0: Data-heavy and Python
+    "data_app": ["django-htmx"],
+    "api_backend": ["django-htmx", "rails"],
+    "interactive_app": ["sveltekit", "nextjs-supabase"],
 
     # Native iOS (v7.0)
     "ios_app": ["swift-swiftui"],
@@ -170,14 +218,16 @@ PRODUCT_TYPE_STACKS: dict[str, list[StackId]] = {
 # Feature requirements that influence stack choice
 FEATURE_REQUIREMENTS: dict[str, list[StackId]] = {
     # Database features
-    "complex_relations": ["nextjs-prisma", "rails"],
-    "transactions": ["nextjs-prisma", "rails"],
-    "migrations": ["nextjs-prisma", "rails"],
+    "complex_relations": ["nextjs-prisma", "rails", "django-htmx"],
+    "transactions": ["nextjs-prisma", "rails", "django-htmx"],
+    "migrations": ["nextjs-prisma", "rails", "django-htmx"],
+    "orm": ["django-htmx", "nextjs-prisma", "rails"],
 
     # Auth and realtime
-    "realtime": ["nextjs-supabase", "expo-supabase"],
-    "social_auth": ["nextjs-supabase", "expo-supabase", "rails"],
+    "realtime": ["nextjs-supabase", "expo-supabase", "sveltekit"],
+    "social_auth": ["nextjs-supabase", "expo-supabase", "rails", "django-htmx"],
     "rls": ["nextjs-supabase", "expo-supabase"],
+    "auth": ["django-htmx", "rails", "nextjs-supabase", "sveltekit"],
 
     # Mobile
     "push_notifications": ["expo-supabase"],
@@ -185,12 +235,25 @@ FEATURE_REQUIREMENTS: dict[str, list[StackId]] = {
     "native_features": ["expo-supabase"],
 
     # Backend heavy
-    "background_jobs": ["rails", "nextjs-prisma"],
-    "mailers": ["rails", "nextjs-prisma"],
-    "admin_interface": ["rails"],
+    "background_jobs": ["django-htmx", "rails", "nextjs-prisma"],
+    "mailers": ["django-htmx", "rails", "nextjs-prisma"],
+    "admin_interface": ["django-htmx", "rails"],
+    "rest_api": ["django-htmx", "rails", "nextjs-prisma"],
 
     # Storage
-    "file_storage": ["nextjs-supabase", "expo-supabase", "rails"],
+    "file_storage": ["nextjs-supabase", "expo-supabase", "rails", "django-htmx"],
+
+    # v11.0: Framework-specific features
+    "htmx": ["django-htmx"],
+    "ssr": ["sveltekit", "nextjs-supabase", "nextjs-prisma"],
+    "form_actions": ["sveltekit"],
+    "progressive_enhancement": ["sveltekit", "astro"],
+    "static_generation": ["astro", "nextjs-supabase"],
+    "islands": ["astro"],
+    "markdown": ["astro"],
+    "cms_integration": ["astro", "nextjs-supabase"],
+    "zero_js_default": ["astro"],
+    "api_routes": ["sveltekit", "nextjs-supabase", "nextjs-prisma"],
 
     # Native iOS (v7.0)
     "local_storage": ["swift-swiftui"],
