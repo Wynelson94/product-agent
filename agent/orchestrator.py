@@ -1,4 +1,4 @@
-"""Orchestrator for Product Agent v9.0.
+"""Orchestrator for Product Agent v11.1.
 
 This is the brain of the pipeline. It runs 9 phases sequentially (with Audit+Test
 in parallel), validating output between each phase. If a phase fails, it retries
@@ -6,6 +6,14 @@ with the error injected into the prompt so Claude can learn from the mistake.
 
 Replaces the v7.0 monolithic single-call architecture where one 200-turn subprocess
 did everything. Now Python controls ordering, validation, and retry logic.
+
+Key design decisions:
+- Each phase is a separate Claude SDK call (not one giant conversation)
+- Python validates between phases so failures are caught early
+- Errors from failed phases are injected into retry prompts (error learning)
+- Audit and Test run in parallel to save wall-clock time
+- Enhancement mode replaces Analysis+Design+Review with a single Enhance phase
+- Resume (--resume) skips completed phases by checking artifacts on disk
 """
 
 import asyncio
@@ -15,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .state import AgentState, Phase, create_initial_state
+from .state import AgentState, Phase, ReviewStatus, create_initial_state
 from .checkpoints import CheckpointManager
 from .validators import validate_phase_output, validate_build_routes
 from .progress import ProgressReporter, PhaseResult
@@ -28,30 +36,39 @@ from . import config
 
 @dataclass
 class BuildConfig:
-    """Configuration for a product build."""
-    stack: str | None = None
-    mode: str = "standard"  # standard | plugin | host | enhancement
-    enrich: bool = False
-    enrich_url: str | None = None
-    verbose: bool = False
-    require_tests: bool = True
-    legacy: bool = False
-    design_file: str | None = None
-    enhance_features: list[str] = field(default_factory=list)
-    resume: bool = False
-    resume_from: str | None = None
+    """Configuration for a product build.
+
+    Controls which phases run, what stack to use, and how strict the
+    quality gates are. Passed to build_product() from main.py CLI args.
+    """
+    stack: str | None = None                   # Force a specific stack (None = auto-select)
+    mode: str = "standard"                     # standard | plugin | host | enhancement
+    enrich: bool = False                       # Enable prompt enrichment phase (researches domain)
+    enrich_url: str | None = None              # Reference URL for enrichment research
+    verbose: bool = False                      # Show detailed progress output
+    require_tests: bool = True                 # Block deploy if tests fail (quality gate)
+    legacy: bool = False                       # Use v7.0 single-subprocess mode
+    design_file: str | None = None             # Path to existing DESIGN.md (enhancement mode)
+    enhance_features: list[str] = field(default_factory=list)  # Features to add in enhancement
+    resume: bool = False                       # Resume from most recent checkpoint
+    resume_from: str | None = None             # Resume from specific checkpoint ID
 
 
 @dataclass
 class BuildResult:
-    """Result of a complete build."""
+    """Result of a complete build. Returned by build_product().
+
+    On success: url is the deployed URL, quality is the grade string.
+    On failure: reason explains why and which phase failed.
+    phase_results contains per-phase timing and status for debugging.
+    """
     success: bool
-    url: str | None = None
-    quality: str | None = None
-    duration_s: float = 0.0
-    test_count: str | None = None
-    spec_coverage: str | None = None
-    reason: str | None = None
+    url: str | None = None                     # Deployed URL (None if deploy blocked or failed)
+    quality: str | None = None                 # Grade string e.g. "A (95%)"
+    duration_s: float = 0.0                    # Total wall-clock time
+    test_count: str | None = None              # e.g. "14/14" (passed/total)
+    spec_coverage: str | None = None           # e.g. "12/12" (requirements met/total)
+    reason: str | None = None                  # Failure reason (None on success)
     phase_results: list[PhaseResult] = field(default_factory=list)
 
 
@@ -143,12 +160,19 @@ async def build_product(
     is_enhancement = cfg.mode == "enhancement"
 
     def _track_turns(call_result: PhaseCallResult) -> None:
-        """Accumulate turns and raise if limit exceeded."""
+        """Accumulate turns across all phases and enforce the global turn limit.
+
+        This prevents runaway builds from consuming unlimited API credits.
+        The limit (MAX_TOTAL_TURNS, default 300) applies across ALL phases
+        combined, not per-phase. Per-phase limits are in PhaseConfig.max_turns.
+
+        Why isinstance guards: In tests, mocks can set num_turns to non-int values.
+        getattr on config guards against mocked config modules that don't define
+        MAX_TOTAL_TURNS. Both are defensive against test environments, not production.
+        """
         nonlocal total_turns
-        # Defensive type check: mocks and SDK edge cases can return non-int num_turns
         turns = call_result.num_turns if isinstance(call_result.num_turns, int) else 0
         total_turns += turns
-        # getattr+isinstance guards against mocked config in tests
         max_turns = getattr(config, 'MAX_TOTAL_TURNS', 300)
         if isinstance(max_turns, int) and total_turns > max_turns:
             raise _TurnLimitExceeded(
@@ -261,8 +285,7 @@ async def build_product(
 
                 if review_validation.extracted.get("approved", True):
                     approved = True
-                    # Construct enum value from string — avoids importing ReviewStatus here
-                    state.review_status = state.review_status.__class__("approved")
+                    state.review_status = ReviewStatus.APPROVED
                     break
 
                 # Not approved — prepare for next revision
@@ -346,8 +369,14 @@ async def build_product(
         # Run both in parallel via asyncio.gather to save 20-60 seconds.
         # Audit checks if the build matches the original requirements.
         # Test generates and runs automated tests.
+        # NOTE: audit_validation and test_validation are initialized to None here
+        # because the skip branch doesn't create them, but the quality gate and
+        # build-complete sections reference them. Without this, resume with both
+        # phases skipped causes NameError.
         audit_skip = cfg.resume and _should_skip_phase(state, Phase.AUDIT, project_path)
         test_skip = cfg.resume and _should_skip_phase(state, Phase.TEST, project_path)
+        audit_validation = None  # Set by the non-skip branch below
+        test_validation = None   # Set by the non-skip branch below
 
         if audit_skip and test_skip:
             progress.phase_skipped("Audit", f"{state.spec_audit_discrepancies} discrepancies")
@@ -368,12 +397,15 @@ async def build_product(
             _track_turns(audit_call)
             _track_turns(test_call)
 
-            # Process audit results — compute discrepancies as (total - met)
+            # Process audit results — compute discrepancies as (total - met).
+            # The auditor's YAML front-matter may report total as an int or "?"
+            # when it can't determine the total requirement count. We guard with
+            # isinstance so "?" doesn't cause a TypeError in the subtraction.
+            # When total is unknown, discrepancies defaults to 0 (optimistic).
             state.spec_audit_completed = True
             if audit_validation.extracted.get("requirements_met"):
                 met = audit_validation.extracted["requirements_met"]
                 total = audit_validation.extracted.get("requirements_total", "?")
-                # Guard: total might be "?" string, only do math if it's an int
                 state.spec_audit_discrepancies = max(0, (total if isinstance(total, int) else 0) - met)
             elif audit_validation.extracted.get("discrepancies"):
                 state.spec_audit_discrepancies = audit_validation.extracted["discrepancies"]
@@ -398,22 +430,17 @@ async def build_product(
 
         # Quality gate: block deploy if tests failed. This prevents deploying
         # known-broken code. Can be disabled with require_tests=False.
-        # When phases were skipped on resume, use state.tests_passed directly
-        # (test_validation doesn't exist in the skip branch).
+        #
+        # The check is simple: if require_tests is on AND state says tests didn't
+        # pass, block the deploy. state.tests_passed is set by either:
+        # - The test phase that just ran (line ~391-393 above)
+        # - A previous run's checkpoint (loaded on resume)
+        # Either way, state.tests_passed is the single source of truth here.
         if cfg.require_tests and not state.tests_passed:
-            if not (audit_skip and test_skip):
-                # Only check test_validation when phases actually ran
-                if test_validation.extracted.get("all_passed") is False:
-                    return _build_failed(
-                        progress, "Tests failed",
-                        "Deployment blocked: tests must pass before deploy"
-                    )
-            else:
-                # Phases were skipped — state.tests_passed is already False
-                return _build_failed(
-                    progress, "Tests failed",
-                    "Deployment blocked: tests must pass before deploy"
-                )
+            return _build_failed(
+                progress, "Tests failed",
+                "Deployment blocked: tests must pass before deploy"
+            )
 
         # --- Phase 8: Deploy ---
         # Deploys to production (Vercel/Railway/TestFlight). Checks for
@@ -471,13 +498,13 @@ async def build_product(
         quality_report = compute_quality_score(state)
         quality = f"{quality_report.grade} ({quality_report.score}%)"
 
-        # When audit+test were skipped on resume, audit_validation doesn't exist.
+        # When audit+test were skipped on resume, audit_validation is None.
         # Fall back to state fields which were populated in the original run.
-        if audit_skip and test_skip:
-            spec_met = state.spec_audit_discrepancies  # approximate: we only stored discrepancies
-            spec_coverage_str = f"?/? ({state.spec_audit_discrepancies} discrepancies)"
-        else:
+        if audit_validation is not None:
             spec_coverage_str = f"{audit_validation.extracted.get('requirements_met', '?')}/{audit_validation.extracted.get('requirements_total', '?')}"
+        else:
+            # Skipped phases — use approximate data from checkpoint state
+            spec_coverage_str = f"?/? ({state.spec_audit_discrepancies} discrepancies)"
 
         result = BuildResult(
             success=True,
@@ -493,6 +520,7 @@ async def build_product(
         return result
 
     except _TurnLimitExceeded as e:
+        # Global turn limit exceeded — save checkpoint so user can resume later
         state.mark_failed(str(e))
         checkpoint_mgr.save(state)
         progress.build_failed(str(e))
@@ -501,6 +529,7 @@ async def build_product(
                            phase_results=progress.results)
 
     except KeyboardInterrupt:
+        # User pressed Ctrl+C — save progress so --resume can pick up later
         state.mark_failed("Interrupted by user")
         checkpoint_mgr.save(state)
         progress.build_failed("Interrupted by user")
@@ -508,6 +537,9 @@ async def build_product(
                            duration_s=progress.total_duration_s)
 
     except Exception as e:
+        # Unexpected error (SDK crash, network failure, etc.) — save state
+        # and return a failure result rather than letting the exception propagate.
+        # This ensures the CLI always gets a BuildResult, even on crashes.
         state.mark_failed(str(e))
         checkpoint_mgr.save(state)
         progress.build_failed(str(e))
@@ -563,8 +595,14 @@ def _parse_stack_decision(project_path: Path) -> str:
     if match:
         return match.group(1).strip('`')
 
-    # Strategy 2: Look for any known stack ID mentioned anywhere in the file
-    for stack_id in ["nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui"]:
+    # Strategy 2: Look for any known stack ID mentioned anywhere in the file.
+    # Order matters: more specific IDs first to avoid "nextjs" matching the wrong stack.
+    # This list must include all stacks from criteria.py.
+    known_stacks = [
+        "nextjs-supabase", "nextjs-prisma", "django-htmx", "sveltekit",
+        "astro", "rails", "expo-supabase", "swift-swiftui",
+    ]
+    for stack_id in known_stacks:
         if stack_id in content.lower():
             return stack_id
 
@@ -575,12 +613,23 @@ def _parse_stack_decision(project_path: Path) -> str:
 def _setup_enhancement_mode(
     state: AgentState, cfg: BuildConfig, project_path: Path
 ) -> None:
-    """Set up enhancement mode by copying existing design."""
+    """Set up enhancement mode by copying existing design and inferring the stack.
+
+    Enhancement mode adds features to an already-built product. Instead of running
+    Analysis + Design + Review, we copy the existing DESIGN.md, infer the stack from
+    its contents, and let the Enhance phase modify it.
+
+    The stack is inferred by keyword matching (prisma → nextjs-prisma, etc.).
+    An explicit --stack flag overrides the inference. If nothing matches, we
+    default to nextjs-supabase as the safest choice.
+    """
     source_design = Path(cfg.design_file).resolve()
     if source_design.exists():
         shutil.copy(source_design, project_path / "DESIGN.md")
 
-    # Infer stack from keywords in existing design (prisma → nextjs-prisma, etc.)
+    # Infer stack from keywords in existing design.
+    # Explicit --stack flag (cfg.stack) always takes priority via the `or` chain.
+    # Order: prisma before supabase because Prisma projects also mention supabase sometimes.
     design_content = (project_path / "DESIGN.md").read_text() if (project_path / "DESIGN.md").exists() else ""
     if "prisma" in design_content.lower():
         state.stack_id = cfg.stack or "nextjs-prisma"
@@ -588,6 +637,12 @@ def _setup_enhancement_mode(
         state.stack_id = cfg.stack or "nextjs-supabase"
     elif "swift" in design_content.lower():
         state.stack_id = cfg.stack or "swift-swiftui"
+    elif "django" in design_content.lower():
+        state.stack_id = cfg.stack or "django-htmx"
+    elif "svelte" in design_content.lower():
+        state.stack_id = cfg.stack or "sveltekit"
+    elif "astro" in design_content.lower():
+        state.stack_id = cfg.stack or "astro"
     else:
         state.stack_id = cfg.stack or "nextjs-supabase"
 
