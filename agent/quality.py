@@ -63,8 +63,13 @@ def compute_quality_score(
         notes.append("No tests generated")
 
     # Spec coverage (20 points)
+    # NOTE: The CRITICAL penalty here (deducting from the 20-point pool) is SEPARATE
+    # from the hard cap on line 124 (which caps the TOTAL score at 84). Both apply:
+    # 1. This section reduces spec_coverage points (affecting factor breakdown)
+    # 2. The hard cap ensures overall grade doesn't exceed B regardless of other factors
     if state.spec_audit_completed:
-        # v10.0: CRITICAL findings penalty — each CRITICAL finding costs 5 points
+        # v10.0: CRITICAL findings penalty — 5 pts per finding, max 15 pt deduction.
+        # Capped at 15 so spec_coverage can't go below 0 (max() on line 72 ensures this).
         critical_penalty = min(15, state.spec_audit_critical_count * 5)
         if state.spec_audit_discrepancies == 0 and state.spec_audit_critical_count == 0:
             factors["spec_coverage"] = 20

@@ -94,6 +94,11 @@ class CheckpointManager:
         with open(latest_path) as f:
             data = json.load(f)
 
+        # Guard against corrupted checkpoint files missing required keys.
+        # A checkpoint written by an older version or manually edited might
+        # lack "id" or "state". Return None instead of crashing with KeyError.
+        if "id" not in data or "state" not in data:
+            return None
         return data["id"], AgentState.from_dict(data["state"])
 
     def load(self, checkpoint_id: str) -> Optional[AgentState]:
@@ -112,6 +117,8 @@ class CheckpointManager:
         with open(checkpoint_path) as f:
             data = json.load(f)
 
+        if "state" not in data:
+            return None  # Corrupted checkpoint — missing state key
         return AgentState.from_dict(data["state"])
 
     def list_checkpoints(self) -> list[dict]:
