@@ -11,6 +11,9 @@ cd src
 # Install Supabase
 npx expo install @supabase/supabase-js @react-native-async-storage/async-storage react-native-url-polyfill
 
+# Install Expo Router (file-based routing used in app/ directory)
+npx expo install expo-router expo-linking expo-constants
+
 # Install navigation
 npx expo install @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
 npx expo install react-native-screens react-native-safe-area-context

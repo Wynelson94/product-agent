@@ -16,6 +16,8 @@ rails generate devise User
 # Install admin interface
 bundle add activeadmin
 rails generate active_admin:install
+rails generate active_admin:dashboard
+rails db:migrate
 
 # Install background jobs
 bundle add sidekiq

@@ -46,6 +46,11 @@ export async function createClient() {
 
 ### Middleware (middleware.ts)
 
+> **Next.js 16 note**: In Next.js 16+, `middleware.ts` is renamed to `proxy.ts` and runs
+> exclusively on the Node.js runtime (Edge runtime no longer supported for proxy).
+> Place `proxy.ts` at the same level as your `app/` directory. The API is the same —
+> just rename the file and remove any `export const runtime = 'edge'` if present.
+
 ```typescript
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'

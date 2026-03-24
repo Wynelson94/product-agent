@@ -36,7 +36,7 @@ MAX_TURNS = 200
 ENABLE_CHECKPOINTS = get_env("ENABLE_CHECKPOINTS", "false").lower() == "true"
 AUDIT_LOG_PATH = get_env("AUDIT_LOG", "./agent_audit.jsonl")
 
-# v4.0 Feature flags
+# v4.0 Feature flags — default true since v8.0, but still checked in main.py legacy mode
 ENABLE_STACK_SELECTION = get_env("ENABLE_STACK_SELECTION", "true").lower() == "true"
 ENABLE_DESIGN_REVIEW = get_env("ENABLE_DESIGN_REVIEW", "true").lower() == "true"
 ENABLE_TEST_GENERATION = get_env("ENABLE_TEST_GENERATION", "true").lower() == "true"

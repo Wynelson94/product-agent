@@ -159,10 +159,14 @@ Add to `package.json` scripts:
 ```json
 {
   "scripts": {
-    "build:web": "npx expo export --platform web"
+    "build:web": "npx expo export --platform web",
+    "test:web-bundle": "npx expo export --platform web && ! grep -r 'import\\.meta' dist/bundles/ --include='*.js' -l"
   }
 }
 ```
+
+> **IMPORTANT**: Always run `npm run test:web-bundle` before deploying web builds.
+> A passing result means no `import.meta` references in the bundle.
 
 ### Deploy
 

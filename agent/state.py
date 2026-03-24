@@ -1,9 +1,9 @@
-"""State management for Product Agent v7.0.
+"""State management for Product Agent v10.1.
 
 Tracks the agent's progress through phases and handles iteration limits.
 Includes deployment-aware verification, compatibility tracking,
-spec auditing (v6.0), prompt enrichment (v6.0), and Swift/SwiftUI
-plugin architecture tracking (v7.0).
+spec auditing (v6.0), prompt enrichment (v6.0), Swift/SwiftUI
+plugin architecture tracking (v7.0), and CRITICAL audit override (v10.0).
 """
 
 from dataclasses import dataclass, field

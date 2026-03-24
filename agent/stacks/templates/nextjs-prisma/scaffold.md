@@ -108,7 +108,7 @@ model User {
   email         String    @unique
   emailVerified DateTime?
   image         String?
-  password      String?
+  passwordHash  String?
   accounts      Account[]
   sessions      Session[]
   createdAt     DateTime  @default(now())

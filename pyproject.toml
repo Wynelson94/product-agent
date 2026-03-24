@@ -1,6 +1,6 @@
 [project]
 name = "product-agent"
-version = "8.0.0"
+version = "10.1.0"
 description = "Autonomous AI agent that builds, tests, and deploys web and native iOS applications from ideas"
 readme = "README.md"
 requires-python = ">=3.10"

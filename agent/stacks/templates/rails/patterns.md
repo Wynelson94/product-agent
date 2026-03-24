@@ -7,9 +7,11 @@
 ```ruby
 # app/models/user.rb
 class User < ApplicationRecord
+  # NOTE: :confirmable requires email delivery config (letter_opener for dev,
+  # SendGrid/Mailgun for production). Only add :confirmable if email is set up.
   devise :database_authenticatable, :registerable,
          :recoverable, :rememberable, :validatable,
-         :confirmable, :trackable
+         :trackable
 
   has_many :items, dependent: :destroy
 
