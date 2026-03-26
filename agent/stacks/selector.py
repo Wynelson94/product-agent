@@ -48,7 +48,6 @@ def analyze_product_idea(idea: str) -> dict:
         "ai_assistant": ["ai assistant", "copilot", "ai helper"],
         # v7.0: Native iOS types
         "ios_app": ["swift", "swiftui", "ios", "iphone", "ipad", "xcode", "native ios"],
-        "plugin_module": ["plugin", "plug-in", "feature module", "swift package", "module"],
         "native_app": ["native app", "apple", "app store", "testflight"],
         "widget": ["widget", "widgetkit", "home screen widget"],
         "app_clip": ["app clip", "appclip"],

@@ -106,19 +106,16 @@ what the product needs.
   ALWAYS create a `babel.config.js` with an `import.meta` → `process.env` transform.
 
 ### Swift + SwiftUI (v7.0)
-- **Best for**: Native iOS apps, Swift Package plugin modules
-- **Features**: Local storage, compression, SwiftUI, Swift Packages, XCTest
+- **Best for**: Native iOS apps
+- **Features**: Local storage, SwiftUI, Swift Packages, XCTest
 - **Complexity**: Medium-High
-- **Deploys to**: TestFlight/App Store (host app), SPM git tag (plugin modules)
+- **Deploys to**: TestFlight/App Store
 - **Database**: Local storage (no external database required)
-- **Build modes**: Use with `--mode host` to build the plugin host app, or `--mode plugin` to build an individual plugin Swift Package
-- **Plugin architecture**: All plugins conform to the NCBSPlugin protocol and receive a PluginContext with shared services (compression, storage, network)
 
 ### Local/App Store Deployment (Swift)
 Swift builds have NO serverless constraints. They run on-device:
-- Host apps: Archived via `xcodebuild` → uploaded to TestFlight/App Store
-- Plugin modules: Built as Swift Packages → distributed via SPM git tags
-- No database server needed — all data is stored locally using compressed file storage
+- Apps: Archived via `xcodebuild` → uploaded to TestFlight/App Store
+- No database server needed — all data is stored locally
 - No environment variables needed for deployment (unlike web stacks)
 
 ### When NOT to Choose Swift
@@ -159,7 +156,6 @@ deployment_target: vercel
 
 ## Selected Stack
 - **Stack ID**: [nextjs-supabase/nextjs-prisma/rails/expo-supabase/swift-swiftui]
-- **Build Mode**: [standard/host/plugin] (standard for web stacks; host or plugin for swift-swiftui)
 - **Rationale**: [2-3 sentences explaining why this stack fits]
 
 ## Stack-Specific Considerations
@@ -189,7 +185,6 @@ Read STACK_DECISION.md and create a comprehensive DESIGN.md for the product.
 
 Pay special attention to:
 - **Stack ID**: Determines which patterns (web vs Swift) to follow
-- **Build Mode**: `standard` (web), `host` (iOS host app), or `plugin` (Swift Package module)
 
 ## Deliverables
 
@@ -286,29 +281,11 @@ For each form, specify:
 
 When designing for the `swift-swiftui` stack:
 
-### For Host Mode (--mode host)
-Design the plugin host app with:
-- **Plugin Registry**: How plugins are discovered and loaded
-- **Shared Services**: CompressionService, StorageService, NetworkService implementations
-- **Core Views**: Dashboard (storage stats), Settings (app + plugin settings)
-- **Navigation**: TabView with dynamic plugin tabs
-- **Plugin Protocol**: NCBSPlugin conformance requirements
-
-### For Plugin Mode (--mode plugin)
-Design the plugin module with:
-- **Plugin Manifest**: id, name, description, icon, version
-- **Views**: MainView (primary tab view), SettingsView (optional)
-- **Models**: Codable structs for plugin-specific data
+- **Views**: MainView (primary view), SettingsView (optional)
+- **Models**: Codable structs for app-specific data
 - **ViewModels**: `@Observable` classes (NEVER use `ObservableObject`/`@Published`) with load/save lifecycle
-- **Storage Keys**: Namespaced key convention for plugin data
-- **Permissions**: Which PluginPermissions are needed
-
-### NoCloud BS Plugin Requirements
-- **Colors**: Use the host's color palette (black #000000, blackGold #1A1400, gold #CFB53B, teal #008080).
-  No custom color schemes — plugins must visually match the host app. Include `Color+NoCloudBS.swift`.
-- **Offline-First**: Every feature must work without internet. No network-dependent features, no loading spinners waiting on connectivity.
-- **Dual-Platform**: Design views that work on both iOS (NavigationStack) and macOS (NavigationSplitView).
-- **Accessibility**: Include VoiceOver labels for all interactive elements in the design. WCAG AAA contrast (7:1).
+- **Offline-First**: Every feature must work without internet where possible.
+- **Accessibility**: Include VoiceOver labels for all interactive elements in the design.
 
 ### Swift Data Model Format
 Use Swift structs instead of database tables:
@@ -345,21 +322,11 @@ For every ViewModel, include:
 // }
 ```
 
-### Plugin Storage Key Convention
-Plugin mode storage keys must be namespaced:
-- `"items"` — top-level collection
-- `"items/\\(id)/data"` — item binary data
-- `"settings"` — plugin preferences
-The StorageService automatically scopes to the plugin's directory, so no plugin ID prefix is needed.
-
 ### Swift Implementation Checklist (include in DESIGN.md)
-For plugin mode, add a checklist at the end of DESIGN.md:
-- [ ] Plugin ID: `com.nocloudbs.[slug]`
-- [ ] Expected files: list each .swift file (Plugin, Manifest, Views, Models, ViewModels)
+- [ ] Expected files: list each .swift file (Views, Models, ViewModels)
 - [ ] Models: list each Codable struct
 - [ ] Views: list each SwiftUI View
 - [ ] ViewModels: list each @Observable class
-- [ ] Minimum test count: 8 (plugin) or 15 (host)
 
 ## Rules
 - Be decisive. Choose one good approach.
@@ -411,14 +378,8 @@ Review DESIGN.md and validate it's ready for implementation.
 ### Swift/SwiftUI Validation (if stack is swift-swiftui)
 - [ ] ViewModels use `@Observable` (not ObservableObject)
 - [ ] Models conform to `Codable` and `Identifiable`
-- [ ] NCBSPlugin conformance is defined (plugin mode)
-- [ ] Storage keys are namespaced (no raw string keys without convention)
-- [ ] Required `PluginPermission` values are documented
-- [ ] PluginManifest.swift is included in file list
-- [ ] Package.swift dependencies include NCBSPluginSDK
-- [ ] Plugin ID follows reverse-DNS format (`com.nocloudbs.*`)
 - [ ] Directory structure has Views/, Models/, ViewModels/ directories
-- [ ] Tests/ directory with Mocks/ subdirectory is planned
+- [ ] Tests/ directory is planned
 
 **BLOCKING for Swift**: If DESIGN.md specifies `ObservableObject` or `@Published` for ViewModels,
 the review MUST return `NEEDS_REVISION` with explicit instruction to use `@Observable` instead.
@@ -643,31 +604,7 @@ grep -r "import\\.meta" dist/bundles/ --include="*.js" | grep -v "//" | grep -v 
 npx vercel --prod
 ```
 
-### Swift + SwiftUI — Plugin Mode (v7.0)
-```bash
-# 1. Pre-deploy integrity check (REQUIRED before tagging)
-# Verify PluginManifest.swift exists
-test -f Sources/*/PluginManifest.swift || echo "BLOCKED: Missing PluginManifest.swift"
-
-# Verify NCBSPlugin conformance (grep for protocol conformance)
-grep -r "NCBSPlugin" Sources/ --include="*.swift" | grep -q ":" || echo "BLOCKED: No NCBSPlugin conformance"
-
-# 2. Verify build
-swift build
-
-# 3. Run tests (MUST pass before tagging)
-swift test
-
-# 4. Verify package resolution
-swift package resolve
-
-# 5. Tag for SPM distribution
-git init && git add . && git commit -m "Initial release"
-git tag 1.0.0
-```
-Plugin deployment = integrity check + build verification + git tag. No App Store needed.
-
-### Swift + SwiftUI — Host Mode (v7.0)
+### Swift + SwiftUI (v7.0)
 ```bash
 # 1. Xcode preflight check
 xcode-select -p || echo "BLOCKED: Xcode command line tools not installed"
@@ -681,18 +618,10 @@ swift test
 # 4. Archive for TestFlight (requires Xcode project and signing)
 # If signing is not configured, skip archive and report as manual step
 xcodebuild archive \
-    -scheme NoCloudBS \
     -destination 'generic/platform=iOS' \
-    -archivePath ./build/NoCloudBS.xcarchive \
     || echo "Archive failed — likely needs manual signing configuration"
-
-# 5. Export for App Store Connect (if archive succeeded)
-xcodebuild -exportArchive \
-    -archivePath ./build/NoCloudBS.xcarchive \
-    -exportOptionsPlist ExportOptions.plist \
-    -exportPath ./build/export
 ```
-If archive/export fails due to signing, report it as a manual step — the build and tests still validate the code.
+If archive fails due to signing, report it as a manual step -- the build and tests still validate the code.
 
 ## Post-Deployment Setup (v11.0)
 
@@ -1154,42 +1083,18 @@ endpoints_passed: 5
 
 For Swift projects, there is NO URL to check. Verification is build-based:
 
-### Plugin Mode Verification
 ```bash
-# 1. Package resolves
-swift package resolve
-
-# 2. Build succeeds with no errors
+# 1. Build succeeds with no errors
 swift build 2>&1 | tail -5
 
-# 3. All tests pass
+# 2. All tests pass
 swift test 2>&1 | tail -10
-
-# 4. PluginManifest exists and exports correct type
-grep -q "PluginManifest" Sources/*/PluginManifest.swift
 ```
-If all 4 pass → PASSED. If build or tests fail → FAILED.
-
-### Host Mode Verification
-```bash
-# 1. NCBSPluginSDK builds
-cd NCBSPluginSDK && swift build && cd ..
-
-# 2. Host app builds
-swift build 2>&1 | tail -5
-
-# 3. All tests pass
-swift test 2>&1 | tail -10
-
-# 4. (Optional) Xcode build for simulator
-xcodebuild build -scheme NoCloudBS -destination 'platform=iOS Simulator,name=iPhone 15'
-```
-If steps 1-3 pass → PASSED. If xcodebuild fails but swift build passes → PARTIAL.
+If both pass, status is PASSED. If build or tests fail, status is FAILED.
 
 ### Swift Verification Output
 For Swift projects, adapt VERIFICATION.md:
-- Replace "Homepage" section with "Package Build"
-- Replace "Authentication" section with "Plugin Protocol Conformance"
+- Replace "Homepage" section with "Build"
 - Replace "API Health" section with "Test Results"
 - Skip "Database" and "Core Functionality" URL checks
 
@@ -1201,9 +1106,9 @@ For Swift projects, adapt VERIFICATION.md:
 - **FAILED**: App does not load, auth is completely broken, or critical errors exist
 
 ### Swift Apps (v7.0)
-- **PASSED**: `swift build` and `swift test` pass, all protocol conformances verified
+- **PASSED**: `swift build` and `swift test` pass
 - **PARTIAL**: `swift build` passes but some tests fail or xcodebuild has warnings
-- **FAILED**: `swift build` fails or critical protocol conformance missing
+- **FAILED**: `swift build` fails
 
 ## Rules
 - Be thorough but practical
@@ -1284,47 +1189,21 @@ Generate these test files:
 
 **IMPORTANT**: For Swift projects, "routes" means "Views". Use Glob to find `.swift` files in `Sources/*/Views/` to verify all views from DESIGN.md exist.
 
-#### Plugin Mode (--mode plugin)
 Generate these test files:
 
-1. **ViewModel Tests** (Tests/NCBS[Name]Tests/ViewModelTests.swift):
-   - `testInitialState` — verify items is empty, isLoading is false
-   - `testLoadFromEmptyStorage` — load returns empty list
-   - `testAddItem` — add item, verify count increments
-   - `testDeleteItem` — delete item, verify count decrements
-   - `testSaveAndReload` — save items, create new VM, load, verify round-trip
+1. **ViewModel Tests** (Tests/[Name]Tests/ViewModelTests.swift):
+   - `testInitialState` -- verify items is empty, isLoading is false
+   - `testLoadFromEmptyStorage` -- load returns empty list
+   - `testAddItem` -- add item, verify count increments
+   - `testDeleteItem` -- delete item, verify count decrements
+   - `testSaveAndReload` -- save items, create new VM, load, verify round-trip
 
-2. **Plugin Lifecycle Tests** (Tests/NCBS[Name]Tests/PluginTests.swift):
-   - `testPluginMetadata` — verify id, name, icon, version are non-empty
-   - `testPluginIdFormat` — verify id starts with `com.nocloudbs.`
-   - `testPluginManifest` — verify PluginManifest.pluginType matches the plugin
+2. **Model Tests** (Tests/[Name]Tests/ModelTests.swift):
+   - `testItemCreation` -- create instance, verify properties
+   - `testItemCodable` -- encode to JSON, decode back, verify equality
 
-3. **Model Tests** (Tests/NCBS[Name]Tests/ModelTests.swift):
-   - `testItemCreation` — create instance, verify properties
-   - `testItemCodable` — encode to JSON, decode back, verify equality
-
-4. **Mock Context** (Tests/NCBS[Name]Tests/Mocks/MockPluginContext.swift):
-   - Create MockPluginContext with mock services
-   - **Minimum: 8 tests total**
-
-#### Host Mode (--mode host)
-Generate these test files:
-
-1. **Plugin Registry Tests** (3 tests):
-   - `testRegisterPlugin` — register and verify count
-   - `testActivateDeactivate` — activate sets isActive, deactivate clears it
-   - `testPluginLookupById` — register, lookup by ID, verify match
-
-2. **Service Tests** (4 tests):
-   - `testCompressionRoundTrip` — compress then decompress, verify data matches
-   - `testStorageSaveAndLoad` — save data, load by key, verify match
-   - `testStorageDelete` — save, delete, load returns nil
-   - `testStorageListKeys` — save multiple, listKeys returns all
-
-3. **ViewModel Tests** (3 tests): for DashboardViewModel or core views
-4. **Model Tests** (3 tests): for StorageStats, PluginInfo, etc.
-5. **Integration Tests** (2 tests): plugin registration → activation → service access
-   - **Minimum: 15 tests total**
+3. **View Tests** (Tests/[Name]Tests/ViewTests.swift):
+   - Verify key views exist and render without errors
 
 Run tests with: `swift test`
 
@@ -1654,35 +1533,11 @@ discrepancies: 2
 ## Swift/SwiftUI Audit (v7.0)
 
 When auditing Swift projects:
-
-### Plugin Mode — Protocol Compliance (CRITICAL)
-1. Read ORIGINAL_PROMPT.md — extract the plugin name/slug
-2. Use Grep to find `NCBSPlugin` conformance in `Sources/` — verify it exists
-3. Verify plugin ID format: must start with `com.nocloudbs.` followed by a lowercase slug
-4. Verify ALL required protocol members are implemented:
-   - `static var id: String`
-   - `static var name: String`
-   - `static var description: String`
-   - `static var icon: String`
-   - `static var version: String`
-   - `init(context: PluginContext)`
-   - `var mainView: any View`
-5. Verify `PluginManifest.swift` exists and exports the correct type via `pluginType`
-6. Verify all views from DESIGN.md have corresponding `.swift` files in `Sources/*/Views/`
-7. Verify all models from DESIGN.md exist in `Sources/*/Models/`
-8. Check Package.swift has NCBSPluginSDK dependency (remote URL or local path)
-
-### Plugin Mode — Data Accuracy
-- If ORIGINAL_PROMPT.md mentions specific data (names, categories, counts), verify the model fixtures or sample data match
-- Check hardcoded strings in Views match what the prompt describes
-
-### Host Mode
-- Verify NCBSPluginSDK package contains ALL protocol definitions (NCBSPlugin, PluginContext, 3 service protocols, PluginPermission)
-- Verify PluginRegistry implementation exists with register/activate/deactivate methods
-- Verify all 3 service protocols have concrete implementations (CompressionServiceImpl, StorageServiceImpl, NetworkServiceImpl)
-- Verify DashboardView and SettingsView exist in `Sources/*/Views/`
-- Verify App entry point registers plugins
-- Verify PluginContextImpl provides all required services
+1. Read ORIGINAL_PROMPT.md -- extract the app name and requirements
+2. Verify all views from DESIGN.md have corresponding `.swift` files in `Sources/*/Views/`
+3. Verify all models from DESIGN.md exist in `Sources/*/Models/`
+4. If ORIGINAL_PROMPT.md mentions specific data (names, categories, counts), verify the model fixtures or sample data match
+5. Check hardcoded strings in Views match what the prompt describes
 
 ## Rules
 - Be thorough and systematic — check EVERY specific value
@@ -1775,7 +1630,7 @@ def get_agent_prompt(
     Args:
         agent_name: The subagent to get the prompt for
         stack_id: Optional stack ID for template injection
-        build_mode: Optional build mode ("standard", "host", "plugin") for v7.0 Swift builds
+        build_mode: Unused, kept for backward compatibility
         product_type: Optional product type for domain pattern injection (v7.0)
     """
     agents = get_agents()
@@ -1799,20 +1654,12 @@ def get_agent_prompt(
         if builder_ref:
             prompt += f"\n\n## Build Process Reference\n{builder_ref}"
         # Scaffolding reference (directory structure, boilerplate)
-        if stack_id == "swift-swiftui" and build_mode == "plugin":
-            scaffold = _load_template(stack_id, "scaffold-plugin")
-        else:
-            scaffold = _load_template(stack_id, "scaffold")
+        scaffold = _load_template(stack_id, "scaffold")
         patterns = _load_template(stack_id, "patterns")
         if scaffold:
             prompt += f"\n\n## Scaffolding Reference\n{scaffold}"
         if patterns:
             prompt += f"\n\n## Code Patterns Reference\n{patterns}"
-        # Plugin protocol reference for Swift builds
-        if stack_id == "swift-swiftui":
-            protocol_ref = _load_template(stack_id, "plugin-protocol")
-            if protocol_ref:
-                prompt += f"\n\n## Plugin Protocol Reference\n{protocol_ref}"
 
     # Inject deploy template for deployer
     if agent_name == "deployer" and stack_id:
@@ -1825,11 +1672,5 @@ def get_agent_prompt(
         tests = _load_template(stack_id, "tests")
         if tests:
             prompt += f"\n\n## Test Patterns Reference\n{tests}"
-
-    # v7.0: Inject plugin protocol for designer/auditor on Swift builds
-    if agent_name in ("designer", "auditor") and stack_id == "swift-swiftui":
-        protocol_ref = _load_template(stack_id, "plugin-protocol")
-        if protocol_ref:
-            prompt += f"\n\n## Plugin Protocol Reference\n{protocol_ref}"
 
     return prompt

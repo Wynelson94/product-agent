@@ -1,7 +1,7 @@
 """Integration tests for Product Agent v10.0 features.
 
 Tests the end-to-end flow of v10.0 post-mortem fixes:
-  - State serialization roundtrip for new fields (critical_count, build_mode, plugin_packaged)
+  - State serialization roundtrip for new fields (critical_count)
   - Orchestrator CRITICAL count propagation through to quality scoring
   - Resume path safety (no unbound variables when phases are skipped)
   - Dependency audit surfacing in build validation
@@ -83,30 +83,16 @@ class TestV10StateRoundtrip:
         restored = AgentState.from_dict(state.to_dict())
         assert restored.spec_audit_critical_count == 3
 
-    def test_build_mode_survives_serialization(self):
-        state = _make_state(build_mode="plugin")
-        restored = AgentState.from_dict(state.to_dict())
-        assert restored.build_mode == "plugin"
-
-    def test_plugin_packaged_survives_serialization(self):
-        state = _make_state(plugin_packaged=True)
-        restored = AgentState.from_dict(state.to_dict())
-        assert restored.plugin_packaged is True
-
     def test_full_v10_state_roundtrip(self):
         """All v10.0-relevant fields survive a JSON roundtrip."""
         state = _make_state(
             spec_audit_critical_count=5,
-            build_mode="host",
-            plugin_packaged=True,
             spec_audit_completed=True,
             spec_audit_discrepancies=2,
         )
         json_str = state.to_json()
         restored = AgentState.from_json(json_str)
         assert restored.spec_audit_critical_count == 5
-        assert restored.build_mode == "host"
-        assert restored.plugin_packaged is True
         assert restored.spec_audit_completed is True
         assert restored.spec_audit_discrepancies == 2
 
@@ -115,8 +101,6 @@ class TestV10StateRoundtrip:
         data = {"phase": "init", "idea": "test"}
         restored = AgentState.from_dict(data)
         assert restored.spec_audit_critical_count == 0
-        assert restored.build_mode == "standard"
-        assert restored.plugin_packaged is False
 
 
 # ---------------------------------------------------------------------------

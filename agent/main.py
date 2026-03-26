@@ -6,7 +6,7 @@ focused Claude call. Python validates between phases, handles retries with error
 injection, and streams progress in real time.
 
 v8.0: Phase-by-phase orchestration, parallel audit+test, build memory, quality scoring
-v7.0: Swift/SwiftUI plugin architecture with host/plugin build modes
+v7.0: Swift/SwiftUI stack support
 v6.0: Spec auditing, optional prompt enrichment
 v5.0: Deployment-aware stack selection, automated testing, post-deploy verification
 
@@ -14,8 +14,6 @@ Usage:
     python -m agent.main "Build me a todo app"
     python -m agent.main --project-dir ./my-app "Build me a todo app"
     python -m agent.main --stack nextjs-prisma "Build a marketplace"
-    python -m agent.main --stack swift-swiftui --mode host "NoCloud BS host app"
-    python -m agent.main --stack swift-swiftui --mode plugin "Photo gallery plugin"
     python -m agent.main --resume "Build me a todo app"
     python -m agent.main --legacy "Build me a todo app"
 """
@@ -232,11 +230,6 @@ NEVER run these commands:
 - Always use PostgreSQL (Supabase, Neon, Vercel Postgres)
 - If analyzer outputs SQLite + Vercel, STOP and fix before building
 
-## Swift Build Mode (v7.0)
-For Swift/SwiftUI builds, use `--mode host` or `--mode plugin` via CLI (or the analyzer infers the mode).
-Swift builds skip web deployment (Vercel/Railway) and instead verify via `swift build` + `swift test`.
-The verifier agent checks build success instead of URL reachability for Swift projects.
-
 ## Rules
 - Don't ask the user questions. Make decisions.
 - If something is unclear, use reasonable defaults.
@@ -319,167 +312,6 @@ Work autonomously. Don't ask questions. Make reasonable decisions.
 When complete and VERIFIED: "Your enhanced app is live at https://[deployment-url] - Verification: PASSED"
 """
 
-# v7.0: Plugin mode orchestrator prompt
-PLUGIN_ORCHESTRATOR_PROMPT = """You are an autonomous Product Agent v7.0 that builds Swift Package plugin modules for the NoCloud BS app.
-
-## Your Mission
-Take the plugin idea provided and deliver a complete, tested Swift Package that conforms to the NCBSPlugin protocol.
-Work autonomously. Don't ask questions. Make reasonable decisions.
-
-## Context
-NoCloud BS is an iOS app that uses a patented 10:1 lossless compression algorithm (SHA-256 verified)
-to replace cloud storage with local storage. Plugins are self-contained Swift Packages that snap into
-the host app via the NCBSPlugin protocol, receiving shared services through PluginContext.
-
-## Process
-
-### Phase 1: Analysis
-1. Use the `analyzer` subagent to analyze the plugin idea
-2. Confirm stack is `swift-swiftui` and mode is `plugin`
-3. Verify STACK_DECISION.md was created with Stack ID and Build Mode fields
-
-### Phase 2: Design
-1. Use the `designer` subagent to create DESIGN.md with:
-   - Plugin manifest (id, name, description, icon, version)
-   - Data models (Codable structs)
-   - Views hierarchy (MainView, SettingsView, components)
-   - ViewModels with load/save lifecycle
-   - Storage key namespace
-   - Required PluginPermissions
-2. Use the `reviewer` subagent to validate the design
-
-### Phase 3: Build
-1. Use the `builder` subagent to implement the Swift Package
-2. **FIRST**: Builder MUST create `NCBSPluginSDK/` as a local package with the EXACT protocol definitions
-   from the builder prompt (NCBSPlugin, PluginContext as protocol, service protocols, PluginPermission).
-   Do NOT let the builder simplify or redesign the SDK — it must match the spec exactly.
-3. Builder then creates plugin Package.swift with `.package(path: "./NCBSPluginSDK")` dependency,
-   implements NCBSPlugin conformance, creates views/models/viewmodels
-4. Plugin's `PluginManifest.swift` must use the `PluginManifest.pluginType` struct pattern (NOT typealias, NOT a data struct)
-5. Verify with `swift build`
-
-### Phase 4: Audit (v6.0)
-1. Use the `auditor` subagent to verify the build matches ORIGINAL_PROMPT.md
-2. Specifically verify:
-   - NCBSPlugin conformance with ALL required protocol members (static id/name/description/icon/version, init(context:), mainView)
-   - `PluginContext` is a **protocol** in NCBSPluginSDK (NOT a struct or class)
-   - Service protocols exist: `CompressionServiceProtocol`, `StorageServiceProtocol`, `NetworkServiceProtocol`
-   - PluginManifest.swift uses `pluginType: any NCBSPlugin.Type` pattern (NOT typealias, NOT data struct)
-   - Plugin ID format: `com.nocloudbs.[slug]`
-   - All views and models from DESIGN.md have corresponding files
-
-### Phase 5: Test
-1. Use the `tester` subagent to generate and run XCTests
-2. Minimum 8 tests (3 ViewModel, 2 plugin lifecycle, 2 model, 1 service)
-3. Run with `swift test`
-
-### Phase 5.5: Pre-Package Verification
-1. Verify `swift test` passes (ALL tests green) — do NOT proceed to packaging if tests fail
-2. Verify `swift package resolve` succeeds
-3. Verify `swift build` produces no errors
-
-### Phase 6: Package
-1. All verifications from Phase 5.5 must have passed
-2. The plugin is ready to be added to the host app's Package.swift
-
-## Required Artifact Files
-Each phase MUST create its artifact file. Verify these exist before reporting success:
-
-| Phase | File | Created By |
-|-------|------|-----------|
-| Analysis | STACK_DECISION.md | analyzer |
-| Design | DESIGN.md | designer |
-| Review | REVIEW.md | reviewer |
-| Build | (source files) | builder |
-| Audit | SPEC_AUDIT.md | auditor |
-| Test | TEST_RESULTS.md | tester |
-
-If any artifact is missing after its phase completes, instruct the responsible subagent to create it.
-
-## Subagent Usage
-- `analyzer` - Confirms swift-swiftui stack (use FIRST)
-- `designer` - Creates DESIGN.md with plugin architecture
-- `reviewer` - Validates design
-- `builder` - Implements the Swift Package
-- `auditor` - Verifies build matches requirements
-- `tester` - Generates and runs XCTests
-
-## Output
-When complete: "Plugin package ready at [project-dir] - Tests: PASSED - swift build: OK"
-"""
-
-# v7.0: Host mode orchestrator prompt
-HOST_ORCHESTRATOR_PROMPT = """You are an autonomous Product Agent v7.0 that builds the NoCloud BS plugin host app.
-
-## Your Mission
-Build the complete host application shell with plugin infrastructure, shared services,
-and core UI. Work autonomously. Don't ask questions. Make reasonable decisions.
-
-## Context
-NoCloud BS is an iOS app that uses a patented 10:1 lossless compression algorithm (SHA-256 verified)
-to replace cloud storage with local storage. The host app provides:
-- Plugin registry for discovering and managing plugins
-- Shared services (compression, storage, network) via PluginContext
-- Core UI: storage dashboard with compression stats, settings
-- Dynamic TabView navigation where plugins register their own tabs
-
-## Process
-
-### Phase 1: Analysis
-1. Use the `analyzer` subagent to analyze the host app requirements
-2. Confirm stack is `swift-swiftui` and mode is `host`
-
-### Phase 2: Design
-1. Use the `designer` subagent to create DESIGN.md with:
-   - NCBSPluginSDK package (protocol definitions, service protocols)
-   - Plugin registry architecture
-   - Shared service implementations (CompressionService, StorageService, NetworkService)
-   - Core views: DashboardView (storage stats, compression ratio), SettingsView
-   - App entry point with plugin registration
-   - Navigation architecture (TabView with dynamic plugin tabs)
-2. Use the `reviewer` subagent to validate the design
-
-### Phase 3: Build
-1. Use the `builder` subagent to implement the host app
-2. **FIRST**: Builder MUST create NCBSPluginSDK as a local package with ALL protocol definitions
-3. Verify NCBSPluginSDK builds independently: `cd NCBSPluginSDK && swift build`
-4. Then build host app with local path dependency: `.package(path: "../NCBSPluginSDK")`
-5. Implement services, create host app with TabView, set up XCTest infrastructure
-6. Verify with `swift build`
-
-### Phase 4: Audit (v6.0)
-1. Use the `auditor` subagent to verify completeness
-2. Check NCBSPluginSDK has ALL protocols: NCBSPlugin, PluginContext, CompressionServiceProtocol, StorageServiceProtocol, NetworkServiceProtocol, PluginPermission
-3. Check all service protocols have concrete implementations in host app
-4. Verify registry works, DashboardView and SettingsView exist
-
-### Phase 5: Test
-1. Use the `tester` subagent to generate and run XCTests
-2. Minimum 15 tests with this breakdown:
-   - 3 registry tests (register, activate/deactivate, lookup)
-   - 4 service tests (compression round-trip, storage save/load/delete, listKeys)
-   - 3 viewmodel tests (dashboard state, settings state, loading)
-   - 3 model tests (StorageStats, PluginInfo, Codable round-trip)
-   - 2 integration tests (plugin registration → activation → service access)
-3. Run with `swift test`
-
-### Phase 6: Deploy
-1. Verify `swift build` passes cleanly
-2. If Xcode project available: `xcodebuild` archive for TestFlight
-
-## Subagent Usage
-- `analyzer` - Confirms swift-swiftui stack (use FIRST)
-- `designer` - Creates DESIGN.md with host architecture
-- `reviewer` - Validates design
-- `builder` - Implements the host app and SDK
-- `auditor` - Verifies build completeness
-- `tester` - Generates and runs XCTests
-- `deployer` - Builds archive for TestFlight (if applicable)
-
-## Output
-When complete: "Host app ready at [project-dir] - Tests: PASSED - swift build: OK"
-"""
-
 # Legacy v3.0 orchestrator prompt (for --legacy mode)
 LEGACY_ORCHESTRATOR_PROMPT = """You are an autonomous Product Agent that builds web applications end-to-end.
 
@@ -534,7 +366,6 @@ def build_product(
     enhance_features: list[str] | None = None,
     enrich: bool = False,
     enrich_url: str | None = None,
-    build_mode: str = "standard",
     verbose: bool = False,
     json_output: bool = False,
 ) -> str | dict | None:
@@ -555,7 +386,6 @@ def build_product(
         enhance_features: List of features to add (e.g., ["board-views", "dashboards"])
         enrich: If True, run prompt enrichment phase before analysis (v6.0)
         enrich_url: Optional reference URL for enrichment research (v6.0)
-        build_mode: Build mode - "standard", "host", or "plugin" (v7.0)
         verbose: If True, show detailed progress output
 
     Returns:
@@ -565,7 +395,7 @@ def build_product(
     if not legacy_mode:
         build_cfg = BuildConfig(
             stack=force_stack,
-            mode=build_mode if not design_file else "enhancement",
+            mode="enhancement" if design_file else "standard",
             enrich=enrich,
             enrich_url=enrich_url,
             verbose=verbose,
@@ -647,12 +477,8 @@ def build_product(
             print(f"Features to add: {', '.join(enhance_features)}", file=sys.stderr)
     elif legacy_mode:
         print("Mode: Legacy (v3.0 - fixed stack, linear flow)", file=sys.stderr)
-    elif build_mode == "plugin":
-        print("Mode: Plugin (v7.0 - Swift Package module)", file=sys.stderr)
-    elif build_mode == "host":
-        print("Mode: Host (v7.0 - iOS plugin host app)", file=sys.stderr)
     else:
-        print("Mode: v7.0 (flexible stack, iterative flow)", file=sys.stderr)
+        print("Mode: Standard (flexible stack, iterative flow)", file=sys.stderr)
         if enrich:
             print("Enrichment: ENABLED", file=sys.stderr)
             if enrich_url:
@@ -710,13 +536,8 @@ def build_product(
     mcp_config_path = _write_mcp_config(project_path)
 
     # Select system prompt based on mode
-    # Plugin/host modes take priority over generic legacy
     if enhancement_mode:
         system_prompt = ENHANCEMENT_ORCHESTRATOR_PROMPT
-    elif build_mode == "plugin":
-        system_prompt = PLUGIN_ORCHESTRATOR_PROMPT
-    elif build_mode == "host":
-        system_prompt = HOST_ORCHESTRATOR_PROMPT
     elif legacy_mode:
         system_prompt = LEGACY_ORCHESTRATOR_PROMPT
     else:
@@ -783,69 +604,6 @@ Add workflow automation system:
 7. Use the `verifier` subagent to verify the deployment
 
 Start now by reading DESIGN.md, then use the enhancer."""
-
-    elif build_mode == "plugin":
-        # v7.0: Plugin build mode
-        limits_context = _get_phase_limits_context(state)
-        state.stack_id = force_stack or "swift-swiftui"
-        state.build_mode = build_mode
-
-        prompt = f"""Build this plugin: {idea}
-
-Project directory: {project_path}
-Stack: swift-swiftui
-Mode: plugin (Swift Package module)
-
-{limits_context}
-
-## Plugin Architecture
-This plugin will be a Swift Package conforming to the NCBSPlugin protocol.
-It receives shared services (compression, storage, network) via PluginContext.
-Read the plugin-protocol and scaffold-plugin templates for reference.
-
-## Process
-1. Use the analyzer subagent to confirm stack and analyze requirements
-2. Use the designer subagent to create DESIGN.md with plugin manifest, views, models
-3. Use the reviewer subagent to validate the design
-4. Use the builder subagent to implement the Swift Package
-5. Use the auditor subagent to verify the build matches ORIGINAL_PROMPT.md
-6. Use the tester subagent to generate and run XCTests (minimum 8 tests)
-7. Verify `swift build` and `swift test` pass
-
-Start now with the analyzer."""
-
-    elif build_mode == "host":
-        # v7.0: Host app build mode
-        limits_context = _get_phase_limits_context(state)
-        state.stack_id = force_stack or "swift-swiftui"
-        state.build_mode = build_mode
-
-        prompt = f"""Build this host app: {idea}
-
-Project directory: {project_path}
-Stack: swift-swiftui
-Mode: host (Plugin host application)
-
-{limits_context}
-
-## Host App Architecture
-Build the NoCloud BS host app with:
-- NCBSPluginSDK local package (plugin protocol, service protocols)
-- Plugin registry for managing plugin lifecycle
-- Shared service implementations (CompressionService, StorageService, NetworkService)
-- Core UI: DashboardView (storage stats), SettingsView
-- Dynamic TabView with plugin tab registration
-
-## Process
-1. Use the analyzer subagent to confirm stack and analyze requirements
-2. Use the designer subagent to create DESIGN.md with host architecture
-3. Use the reviewer subagent to validate the design
-4. Use the builder subagent to implement the host app and SDK
-5. Use the auditor subagent to verify build completeness
-6. Use the tester subagent to generate and run XCTests (minimum 15 tests)
-7. Verify `swift build` and `swift test` pass
-
-Start now with the analyzer."""
 
     elif legacy_mode:
         prompt = f"""Build this product: {idea}
@@ -955,11 +713,6 @@ Start now with the {"enricher" if enrich and config.ENABLE_PROMPT_ENRICHMENT els
                     state.mark_completed()
                 checkpoint_mgr.save(state)
                 return final_result
-            # v7.0: Swift plugin/host success
-            if "Plugin package ready" in final_result or "Host app ready" in final_result:
-                state.mark_completed()
-                checkpoint_mgr.save(state)
-                return final_result
 
         # If no clear result, check for common success indicators
         if final_result:
@@ -999,12 +752,6 @@ Examples:
     # Custom project directory
     python -m agent.main --project-dir ./my-todo "Build a todo app"
 
-    # Build a Swift plugin module (v7.0)
-    python -m agent.main --stack swift-swiftui --mode plugin "Photo gallery with compressed albums"
-
-    # Build the host app (v7.0)
-    python -m agent.main --stack swift-swiftui --mode host "NoCloud BS host app"
-
     # Resume from last checkpoint
     python -m agent.main --resume "Build a todo app"
 
@@ -1019,12 +766,7 @@ Stacks:
     nextjs-prisma    - Best for marketplaces, complex data models
     rails            - Best for rapid prototyping, admin-heavy apps
     expo-supabase    - Best for cross-platform mobile apps
-    swift-swiftui    - Best for native iOS apps and plugin modules (v7.0)
-
-Build Modes (v7.0):
-    standard         - Default. Build a complete web or mobile app
-    host             - Build the iOS plugin host app (use with swift-swiftui)
-    plugin           - Build a Swift Package plugin module (use with swift-swiftui)
+    swift-swiftui    - Best for native iOS apps (v7.0)
 
 Requirements:
     - Claude Code CLI must be installed and authenticated
@@ -1047,13 +789,6 @@ Requirements:
         "--stack",
         choices=["nextjs-supabase", "nextjs-prisma", "rails", "expo-supabase", "swift-swiftui"],
         help="Force a specific stack instead of auto-selection"
-    )
-
-    parser.add_argument(
-        "--mode",
-        choices=["standard", "host", "plugin"],
-        default="standard",
-        help="Build mode: standard (web app), host (iOS plugin host app), or plugin (Swift Package module) (v7.0)"
     )
 
     parser.add_argument(
@@ -1212,7 +947,6 @@ Requirements:
         enhance_features=enhance_features,
         enrich=enrich,
         enrich_url=args.enrich_url,
-        build_mode=args.mode,
         verbose=getattr(args, 'verbose', False),
         json_output=args.json_output,
     )

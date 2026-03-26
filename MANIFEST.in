@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include pyproject.toml
+
+recursive-include agent *.py *.md
+
+prune tests
+prune projects
+prune stress
+
+exclude CLAUDE.md
+exclude ROADMAP.md
+exclude SESSION_CONTEXT.md

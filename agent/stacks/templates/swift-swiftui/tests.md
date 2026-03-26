@@ -22,24 +22,24 @@ swift test --verbose
 ### 1. ViewModel Unit Tests
 
 ```swift
-// Tests/NCBS[PluginName]Tests/ViewModelTests.swift
+// Tests/AppTests/ViewModelTests.swift
 
 import XCTest
-@testable import NCBS[PluginName]
+@testable import AppCore
 
 final class MainViewModelTests: XCTestCase {
     var viewModel: MainViewModel!
-    var mockContext: MockPluginContext!
+    var mockStorage: MockStorageService!
 
     override func setUp() {
         super.setUp()
-        mockContext = MockPluginContext()
-        viewModel = MainViewModel(context: mockContext)
+        mockStorage = MockStorageService()
+        viewModel = MainViewModel(storageService: mockStorage)
     }
 
     override func tearDown() {
         viewModel = nil
-        mockContext = nil
+        mockStorage = nil
         super.tearDown()
     }
 
@@ -53,7 +53,7 @@ final class MainViewModelTests: XCTestCase {
         // Arrange: seed mock storage
         let items = [Item(name: "Test", description: "A test item")]
         let data = try! JSONEncoder().encode(items)
-        try! await mockContext.storageService.save(data, key: "items")
+        try! await mockStorage.save(data, key: "items")
 
         // Act
         await viewModel.load()
@@ -86,7 +86,7 @@ final class MainViewModelTests: XCTestCase {
         viewModel.addItem(Item(name: "Saved", description: "Saved item"))
         await viewModel.save()
 
-        let stored = try! await mockContext.storageService.load(key: "items")
+        let stored = try! await mockStorage.load(key: "items")
         XCTAssertNotNil(stored)
 
         let decoded = try! JSONDecoder().decode([Item].self, from: stored!)
@@ -96,60 +96,13 @@ final class MainViewModelTests: XCTestCase {
 }
 ```
 
-### 2. Plugin Lifecycle Tests
+### 2. Model Tests
 
 ```swift
-// Tests/NCBS[PluginName]Tests/PluginTests.swift
+// Tests/AppTests/ModelTests.swift
 
 import XCTest
-@testable import NCBS[PluginName]
-
-final class PluginTests: XCTestCase {
-    var plugin: [PluginName]Plugin!
-    var mockContext: MockPluginContext!
-
-    override func setUp() {
-        super.setUp()
-        mockContext = MockPluginContext()
-        plugin = [PluginName]Plugin(context: mockContext)
-    }
-
-    func testPluginMetadata() {
-        XCTAssertFalse([PluginName]Plugin.id.isEmpty)
-        XCTAssertFalse([PluginName]Plugin.name.isEmpty)
-        XCTAssertFalse([PluginName]Plugin.icon.isEmpty)
-        XCTAssertFalse([PluginName]Plugin.version.isEmpty)
-    }
-
-    func testPluginIDFormat() {
-        // Should be reverse DNS
-        XCTAssertTrue([PluginName]Plugin.id.hasPrefix("com.nocloudbs."))
-    }
-
-    func testPluginActivation() async {
-        // Should not throw
-        await plugin.onActivate()
-    }
-
-    func testPluginDeactivation() async {
-        await plugin.onActivate()
-        await plugin.onDeactivate()
-    }
-
-    func testPluginManifest() {
-        // PluginManifest should export the correct type
-        XCTAssertTrue(PluginManifest.pluginType == [PluginName]Plugin.self)
-    }
-}
-```
-
-### 3. Model Tests
-
-```swift
-// Tests/NCBS[PluginName]Tests/ModelTests.swift
-
-import XCTest
-@testable import NCBS[PluginName]
+@testable import AppCore
 
 final class ItemModelTests: XCTestCase {
     func testItemCreation() {
@@ -177,13 +130,13 @@ final class ItemModelTests: XCTestCase {
 }
 ```
 
-### 4. Service Integration Tests
+### 3. Service Integration Tests
 
 ```swift
-// Tests/NCBS[PluginName]Tests/ServiceTests.swift
+// Tests/AppTests/ServiceTests.swift
 
 import XCTest
-@testable import NCBS[PluginName]
+@testable import AppCore
 
 final class StorageIntegrationTests: XCTestCase {
     var mockStorage: MockStorageService!
@@ -226,17 +179,55 @@ final class StorageIntegrationTests: XCTestCase {
 
 ## Minimum Test Requirements
 
-### Plugin Mode (--mode plugin)
+### Swift/SwiftUI Apps
 - **3 ViewModel tests**: initial state, load, add/delete operations
-- **2 Plugin lifecycle tests**: metadata validation, activate/deactivate
 - **2 Model tests**: creation, Codable round-trip
 - **1 Service test**: storage save/load integration
-- **Total minimum: 8 tests**
+- **Total minimum: 6 tests**
 
-### Host Mode (--mode host)
-- **4 ViewModel tests**: for core views (dashboard, settings)
-- **3 Plugin registry tests**: register, activate, deactivate
-- **3 Service tests**: compression, storage, network
-- **3 Model tests**: storage stats, plugin metadata
-- **2 Integration tests**: plugin loading, context injection
-- **Total minimum: 15 tests**
+### Async Testing
+
+```swift
+func testAsyncLoad() async {
+    await viewModel.load()
+    XCTAssertFalse(viewModel.isLoading)
+    XCTAssertEqual(viewModel.items.count, expectedCount)
+}
+
+func testAsyncThrows() async throws {
+    mockStorage.shouldFail = true
+    await viewModel.load()
+    XCTAssertNotNil(viewModel.error)
+}
+```
+
+## Mock Patterns
+
+```swift
+// Mock storage service for testing
+final class MockStorageService: StorageServiceProtocol {
+    var store: [String: Data] = [:]
+    var shouldFail = false
+
+    func save(_ data: Data, key: String) async throws {
+        if shouldFail { throw AppError.storageUnavailable }
+        store[key] = data
+    }
+
+    func load(key: String) async throws -> Data? {
+        if shouldFail { throw AppError.storageUnavailable }
+        return store[key]
+    }
+
+    func delete(key: String) async throws {
+        store.removeValue(forKey: key)
+    }
+
+    func listKeys(prefix: String?) async -> [String] {
+        if let prefix {
+            return store.keys.filter { $0.hasPrefix(prefix) }
+        }
+        return Array(store.keys)
+    }
+}
+```

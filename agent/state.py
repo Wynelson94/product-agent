@@ -2,8 +2,7 @@
 
 Tracks the agent's progress through phases and handles iteration limits.
 Includes deployment-aware verification, compatibility tracking,
-spec auditing (v6.0), prompt enrichment (v6.0), Swift/SwiftUI
-plugin architecture tracking (v7.0), and CRITICAL audit override (v10.0).
+spec auditing (v6.0), prompt enrichment (v6.0), and CRITICAL audit override (v10.0).
 """
 
 from dataclasses import dataclass, field
@@ -104,9 +103,9 @@ class AgentState:
     spec_audit_critical_count: int = 0  # v10.0: Count of CRITICAL findings from audit
     audit_fix_attempted: bool = False
 
-    # v7.0: Swift/SwiftUI plugin architecture
-    build_mode: str = "standard"  # "standard" | "host" | "plugin"
-    plugin_packaged: bool = False  # True when plugin swift build + swift test pass
+    # Build mode — currently only "standard" is supported
+    build_mode: str = "standard"  # "standard"
+    plugin_packaged: bool = False  # Reserved for future use
 
     MAX_PHASE_HISTORY = 50
 
@@ -291,7 +290,7 @@ class AgentState:
             "spec_audit_discrepancies": self.spec_audit_discrepancies,
             "spec_audit_critical_count": self.spec_audit_critical_count,
             "audit_fix_attempted": self.audit_fix_attempted,
-            # v7.0: Swift/SwiftUI plugin architecture
+            # Build mode
             "build_mode": self.build_mode,
             "plugin_packaged": self.plugin_packaged,
         }
@@ -355,7 +354,7 @@ class AgentState:
         state.spec_audit_discrepancies = data.get("spec_audit_discrepancies", 0)
         state.spec_audit_critical_count = data.get("spec_audit_critical_count", 0)
         state.audit_fix_attempted = data.get("audit_fix_attempted", False)
-        # v7.0: Swift/SwiftUI plugin architecture
+        # Build mode
         state.build_mode = data.get("build_mode", "standard")
         state.plugin_packaged = data.get("plugin_packaged", False)
         return state

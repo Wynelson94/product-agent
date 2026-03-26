@@ -28,3 +28,6 @@ dist/
 
 # MCP config (contains local paths)
 .mcp.json
+
+# Internal docs (not for distribution)
+SESSION_CONTEXT.md

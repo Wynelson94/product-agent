@@ -45,11 +45,6 @@ class TestAnalyzeProductIdea:
         assert "ios_app" in result["product_types"]
         assert "mobile_app" in result["product_types"]
 
-    def test_plugin_keyword(self):
-        """Test that 'plugin' triggers plugin_module product type."""
-        result = analyze_product_idea("Create a plugin for image compression")
-        assert "plugin_module" in result["product_types"]
-
     def test_widget_keyword(self):
         """Test that 'widget' triggers widget product type."""
         result = analyze_product_idea("Build a home screen widget for weather")
@@ -325,19 +320,19 @@ class TestStackCompleteness:
                     f"invalid stack ID '{sid}'"
                 )
 
-    def test_swift_swiftui_has_at_least_six_product_types(self):
-        """Test that swift-swiftui has >= 6 product types (v7.0 strengthened)."""
+    def test_swift_swiftui_has_at_least_five_product_types(self):
+        """Test that swift-swiftui has >= 5 product types."""
         swift_stack = STACKS["swift-swiftui"]
-        assert len(swift_stack.product_types) >= 6, (
-            f"swift-swiftui should have >= 6 product types, "
+        assert len(swift_stack.product_types) >= 5, (
+            f"swift-swiftui should have >= 5 product types, "
             f"got {len(swift_stack.product_types)}: {swift_stack.product_types}"
         )
 
-    def test_swift_swiftui_has_at_least_six_features(self):
-        """Test that swift-swiftui has >= 6 features (v7.0 strengthened)."""
+    def test_swift_swiftui_has_at_least_five_features(self):
+        """Test that swift-swiftui has >= 5 features."""
         swift_stack = STACKS["swift-swiftui"]
-        assert len(swift_stack.features) >= 6, (
-            f"swift-swiftui should have >= 6 features, "
+        assert len(swift_stack.features) >= 5, (
+            f"swift-swiftui should have >= 5 features, "
             f"got {len(swift_stack.features)}: {swift_stack.features}"
         )
 

@@ -42,7 +42,7 @@ class BuildConfig:
     quality gates are. Passed to build_product() from main.py CLI args.
     """
     stack: str | None = None                   # Force a specific stack (None = auto-select)
-    mode: str = "standard"                     # standard | plugin | host | enhancement
+    mode: str = "standard"                     # standard | enhancement
     enrich: bool = False                       # Enable prompt enrichment phase (researches domain)
     enrich_url: str | None = None              # Reference URL for enrichment research
     verbose: bool = False                      # Show detailed progress output

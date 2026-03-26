@@ -14,11 +14,6 @@ def _build_prompt(state: AgentState, project_dir: Path) -> str:
     parts.append("\nRead DESIGN.md and validate it against the checklist.")
     parts.append("Read STACK_DECISION.md to understand the selected stack.")
 
-    if state.build_mode != "standard":
-        parts.append(f"\nBuild mode: {state.build_mode}")
-        if state.build_mode == "plugin":
-            parts.append("Pay special attention to NCBSPlugin protocol conformance in the design.")
-
     parts.append("\nCreate REVIEW.md with your verdict (APPROVED or NEEDS_REVISION).")
     return "\n".join(parts)
 

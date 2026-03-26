@@ -18,11 +18,6 @@ def _build_prompt(state: AgentState, project_dir: Path) -> str:
     parts.append("5. Run the tests and ensure they pass")
     parts.append("6. Create TEST_RESULTS.md with the results")
 
-    if state.build_mode == "plugin":
-        parts.append("\nThis is a Swift plugin. Minimum 8 XCTests. Run with: swift test")
-    elif state.build_mode == "host":
-        parts.append("\nThis is a Swift host app. Minimum 15 XCTests. Run with: swift test")
-
     return "\n".join(parts)
 
 

@@ -19,11 +19,6 @@ def _build_prompt(state: AgentState, project_dir: Path) -> str:
     parts.append("5. Set up test infrastructure")
     parts.append("6. Verify the build passes")
 
-    if state.build_mode == "plugin":
-        parts.append("\nThis is a Swift Package plugin build. Create NCBSPluginSDK first, then the plugin package.")
-    elif state.build_mode == "host":
-        parts.append("\nThis is a Swift host app build. Create NCBSPluginSDK first, then the host app.")
-
     return "\n".join(parts)
 
 

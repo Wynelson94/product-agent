@@ -149,13 +149,6 @@ class TestDesignerPrompt:
     def test_mentions_observable_requirement(self):
         assert "@Observable" in self.prompt
 
-    def test_mentions_plugin_manifest(self):
-        assert "Manifest" in self.prompt
-
-    def test_mentions_plugin_storage_key_convention(self):
-        assert "Storage Key Convention" in self.prompt
-        assert "namespaced" in self.prompt
-
     def test_mentions_error_loading_states_section(self):
         assert "Error & Loading States" in self.prompt
 
@@ -185,22 +178,6 @@ class TestBuilderPrompt:
         line_count = self.prompt.count("\n")
         assert line_count < 200, f"Core builder prompt is {line_count} lines, expected < 200"
 
-    def test_swift_builder_template_injects_sdk(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
-        assert "NCBSPluginSDK" in prompt
-
-    def test_swift_builder_template_injects_observable(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
-        assert "@Observable" in prompt
-
-    def test_swift_builder_template_injects_color_constants(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
-        assert "Color+NoCloudBS" in prompt
-
-    def test_swift_builder_template_injects_plugin_manifest(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
-        assert "PluginManifest" in prompt
-
     def test_nextjs_builder_template_injects_test_infra(self):
         prompt = get_agent_prompt("builder", stack_id="nextjs-supabase")
         assert "vitest.config.ts" in prompt
@@ -227,12 +204,6 @@ class TestDeployerPrompt:
     def test_mentions_sqlite_vercel_check(self):
         assert "SQLite + Serverless Check" in self.prompt
 
-    def test_mentions_swift_plugin_mode(self):
-        assert "Plugin Mode" in self.prompt
-
-    def test_mentions_swift_host_mode(self):
-        assert "Host Mode" in self.prompt
-
     def test_mentions_deploy_blocked_md(self):
         assert "DEPLOY_BLOCKED.md" in self.prompt
 
@@ -254,12 +225,6 @@ class TestTesterPrompt:
     def test_mentions_minimum_11_tests_for_web(self):
         assert "11 tests" in self.prompt
 
-    def test_mentions_minimum_8_tests_for_plugin(self):
-        assert "8 tests" in self.prompt
-
-    def test_mentions_minimum_15_tests_for_host(self):
-        assert "15 tests" in self.prompt
-
     def test_mentions_swift_xctest(self):
         assert "XCTest" in self.prompt
 
@@ -280,13 +245,6 @@ class TestAuditorPrompt:
 
     def test_mentions_original_prompt_md(self):
         assert "ORIGINAL_PROMPT.md" in self.prompt
-
-    def test_mentions_swift_plugin_protocol_compliance(self):
-        assert "NCBSPlugin" in self.prompt
-        assert "Protocol Compliance" in self.prompt
-
-    def test_mentions_host_mode_verification(self):
-        assert "Host Mode" in self.prompt
 
     def test_mentions_read_only_constraint(self):
         assert "read-only" in self.prompt.lower()
@@ -356,14 +314,6 @@ class TestGetAgentPromptTemplateInjection:
         prompt = get_agent_prompt("builder", stack_id="nextjs-supabase")
         assert "Code Patterns Reference" in prompt
 
-    def test_builder_with_swift_swiftui_gets_plugin_protocol_injected(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui")
-        assert "Plugin Protocol Reference" in prompt
-
-    def test_builder_with_swift_swiftui_plugin_mode_gets_scaffold_plugin(self):
-        prompt = get_agent_prompt("builder", stack_id="swift-swiftui", build_mode="plugin")
-        assert "Scaffolding Reference" in prompt
-
     def test_deployer_with_stack_gets_deploy_template_injected(self):
         prompt = get_agent_prompt("deployer", stack_id="nextjs-supabase")
         assert "Deployment Reference" in prompt
@@ -371,14 +321,6 @@ class TestGetAgentPromptTemplateInjection:
     def test_tester_with_stack_gets_test_template_injected(self):
         prompt = get_agent_prompt("tester", stack_id="nextjs-supabase")
         assert "Test Patterns Reference" in prompt
-
-    def test_designer_with_swift_swiftui_gets_plugin_protocol_injected(self):
-        prompt = get_agent_prompt("designer", stack_id="swift-swiftui")
-        assert "Plugin Protocol Reference" in prompt
-
-    def test_auditor_with_swift_swiftui_gets_plugin_protocol_injected(self):
-        prompt = get_agent_prompt("auditor", stack_id="swift-swiftui")
-        assert "Plugin Protocol Reference" in prompt
 
     def test_builder_with_product_type_gets_domain_patterns_injected(self):
         prompt = get_agent_prompt("builder", product_type="marketplace")

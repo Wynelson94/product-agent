@@ -19,8 +19,6 @@ from agent.main import (
     _write_mcp_config,
     ORCHESTRATOR_SYSTEM_PROMPT,
     ENHANCEMENT_ORCHESTRATOR_PROMPT,
-    PLUGIN_ORCHESTRATOR_PROMPT,
-    HOST_ORCHESTRATOR_PROMPT,
     LEGACY_ORCHESTRATOR_PROMPT,
     MAX_DESIGN_REVISIONS,
     MAX_BUILD_ATTEMPTS,
@@ -314,27 +312,6 @@ class TestOrchestratorPromptContent:
         assert "`auditor`" in ENHANCEMENT_ORCHESTRATOR_PROMPT
         assert "`tester`" in ENHANCEMENT_ORCHESTRATOR_PROMPT
 
-    # --- Plugin prompt ---
-
-    def test_plugin_prompt_mentions_ncbs_plugin(self):
-        """Plugin prompt should reference the NCBSPlugin protocol."""
-        assert "NCBSPlugin" in PLUGIN_ORCHESTRATOR_PROMPT
-
-    def test_plugin_prompt_mentions_swift_build_and_test(self):
-        """Plugin prompt should mention swift build and swift test commands."""
-        assert "swift build" in PLUGIN_ORCHESTRATOR_PROMPT
-        assert "swift test" in PLUGIN_ORCHESTRATOR_PROMPT
-
-    # --- Host prompt ---
-
-    def test_host_prompt_mentions_plugin_registry(self):
-        """Host prompt should mention PluginRegistry."""
-        assert "PluginRegistry" in HOST_ORCHESTRATOR_PROMPT or "Plugin registry" in HOST_ORCHESTRATOR_PROMPT
-
-    def test_host_prompt_mentions_minimum_15_tests(self):
-        """Host prompt should require minimum 15 tests."""
-        assert "15 tests" in HOST_ORCHESTRATOR_PROMPT
-
     # --- Legacy prompt ---
 
     def test_legacy_prompt_is_simpler(self):
@@ -356,8 +333,6 @@ class TestOrchestratorPromptContent:
         prompts = {
             "standard": ORCHESTRATOR_SYSTEM_PROMPT,
             "enhancement": ENHANCEMENT_ORCHESTRATOR_PROMPT,
-            "plugin": PLUGIN_ORCHESTRATOR_PROMPT,
-            "host": HOST_ORCHESTRATOR_PROMPT,
             "legacy": LEGACY_ORCHESTRATOR_PROMPT,
         }
         for name, prompt in prompts.items():
@@ -379,80 +354,12 @@ class TestOrchestratorPromptContent:
 class TestBuildModeSelection:
     """Tests for mode selection logic in build_product."""
 
-    def test_build_product_signature_accepts_all_modes(self):
-        """build_product should accept build_mode as a parameter."""
+    def test_build_product_signature_has_expected_params(self):
+        """build_product should accept key parameters."""
         sig = inspect.signature(build_product)
         params = sig.parameters
-        assert "build_mode" in params
-        assert params["build_mode"].default == "standard"
         assert "legacy_mode" in params
         assert "design_file" in params
-
-    @patch("agent.main.run_claude")
-    @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
-    def test_plugin_mode_sets_swift_stack(self, _mock_cli, mock_run, tmp_path):
-        """Plugin mode should set stack to swift-swiftui (legacy path)."""
-        mock_run.return_value = {"success": True, "result": "Plugin package ready at /tmp/test - Tests: PASSED - swift build: OK"}
-
-        build_product(
-            idea="Photo gallery plugin",
-            project_dir=str(tmp_path / "plugin-proj"),
-            build_mode="plugin",
-            legacy_mode=True,
-        )
-
-        # Verify the prompt passed to run_claude mentions swift-swiftui
-        call_kwargs = mock_run.call_args
-        prompt = call_kwargs.kwargs.get("prompt") or call_kwargs[1].get("prompt") or call_kwargs[0][0]
-        assert "swift-swiftui" in prompt
-
-    @patch("agent.main.run_claude")
-    @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
-    def test_host_mode_sets_swift_stack(self, _mock_cli, mock_run, tmp_path):
-        """Host mode should set stack to swift-swiftui (legacy path)."""
-        mock_run.return_value = {"success": True, "result": "Host app ready at /tmp/test - Tests: PASSED - swift build: OK"}
-
-        build_product(
-            idea="NoCloud BS host app",
-            project_dir=str(tmp_path / "host-proj"),
-            build_mode="host",
-            legacy_mode=True,
-        )
-
-        call_kwargs = mock_run.call_args
-        prompt = call_kwargs.kwargs.get("prompt") or call_kwargs[1].get("prompt") or call_kwargs[0][0]
-        assert "swift-swiftui" in prompt
-
-    @patch("agent.main.run_claude")
-    @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))
-    def test_each_mode_selects_correct_prompt(self, _mock_cli, mock_run, tmp_path):
-        """Each mode should pass its corresponding system prompt to run_claude (legacy path)."""
-        # Plugin/host modes get their own prompts even with legacy_mode=True.
-        # Standard mode with legacy_mode=True gets the legacy prompt.
-
-        mode_prompt_map = {
-            "standard": LEGACY_ORCHESTRATOR_PROMPT,
-            "plugin": PLUGIN_ORCHESTRATOR_PROMPT,
-            "host": HOST_ORCHESTRATOR_PROMPT,
-        }
-
-        for mode, expected_prompt in mode_prompt_map.items():
-            mock_run.reset_mock()
-            mock_run.return_value = {"success": True, "result": "done"}
-
-            proj = tmp_path / f"proj-{mode}"
-            build_product(
-                idea="test idea",
-                project_dir=str(proj),
-                build_mode=mode,
-                legacy_mode=True,
-            )
-
-            call_kwargs = mock_run.call_args
-            system_prompt = call_kwargs.kwargs.get("system_prompt") or call_kwargs[1].get("system_prompt")
-            assert system_prompt == expected_prompt, (
-                f"Mode '{mode}' did not select the expected system prompt"
-            )
 
     @patch("agent.main.run_claude")
     @patch("agent.main.check_claude_cli", return_value=(True, "claude 1.0"))

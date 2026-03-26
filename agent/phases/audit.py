@@ -24,11 +24,6 @@ def _build_prompt(state: AgentState, project_dir: Path) -> str:
     parts.append("3. Scan all source files to verify implementation matches requirements")
     parts.append("4. Create SPEC_AUDIT.md with your findings")
 
-    if state.build_mode == "plugin":
-        parts.append("\nThis is a Swift plugin. Verify NCBSPlugin conformance and PluginManifest.swift.")
-    elif state.build_mode == "host":
-        parts.append("\nThis is a Swift host app. Verify all service protocols have implementations.")
-
     return "\n".join(parts)
 
 

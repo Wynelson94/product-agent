@@ -2,7 +2,7 @@
 
 ## Architecture: MVVM
 
-All plugins and host views follow Model-View-ViewModel:
+All views follow Model-View-ViewModel:
 
 ```
 View (SwiftUI) → ViewModel (@Observable) → Service (protocol) → Storage/Network
@@ -11,7 +11,7 @@ View (SwiftUI) → ViewModel (@Observable) → Service (protocol) → Storage/Ne
 - **Views** are declarative SwiftUI structs — no business logic
 - **ViewModels** are `@Observable` classes — own the state and logic
 - **Models** are `Codable` structs — pure data
-- **Services** are protocols — injected via PluginContext
+- **Services** are protocols — injected via environment or initializer
 
 ## SwiftUI View Patterns
 
@@ -71,10 +71,10 @@ final class ItemListViewModel {
     var error: String?
     var showAddSheet = false
 
-    private let context: PluginContext
+    private let storageService: StorageService
 
-    init(context: PluginContext) {
-        self.context = context
+    init(storageService: StorageService) {
+        self.storageService = storageService
     }
 }
 
@@ -84,9 +84,9 @@ struct MyView: View {
     // ...
 }
 
-// Use @Environment for dependency injection from host
-struct PluginView: View {
-    @Environment(PluginRegistry.self) var registry
+// Use @Environment for dependency injection
+struct AppView: View {
+    @Environment(AppState.self) var appState
     // ...
 }
 ```
@@ -178,7 +178,7 @@ func load() async {
     defer { isLoading = false }
 
     do {
-        if let data = try await context.storageService.load(key: storageKey) {
+        if let data = try await storageService.load(key: storageKey) {
             self.items = try JSONDecoder().decode([Item].self, from: data)
         }
     } catch {
@@ -186,20 +186,10 @@ func load() async {
     }
 }
 
-// Compressing and saving
-func saveWithCompression(_ item: Item) async throws {
-    let rawData = try JSONEncoder().encode(item)
-    let compressed = try await context.compressionService.compress(data: rawData)
-    try await context.storageService.save(compressed, key: "item-\(item.id)")
-}
-
-// Loading and decompressing
-func loadCompressed(id: UUID) async throws -> Item? {
-    guard let compressed = try await context.storageService.load(key: "item-\(id)") else {
-        return nil
-    }
-    let raw = try await context.compressionService.decompress(data: compressed)
-    return try JSONDecoder().decode(Item.self, from: raw)
+// Saving data
+func save(_ item: Item) async throws {
+    let data = try JSONEncoder().encode(item)
+    try await storageService.save(data, key: "item-\(item.id)")
 }
 ```
 
@@ -207,19 +197,19 @@ func loadCompressed(id: UUID) async throws -> Item? {
 
 ```swift
 // Use typed errors for domain logic
-enum PluginError: LocalizedError {
+enum AppError: LocalizedError {
     case storageUnavailable
-    case compressionFailed(String)
-    case permissionDenied(PluginPermission)
+    case networkFailed(String)
+    case invalidData
 
     var errorDescription: String? {
         switch self {
         case .storageUnavailable:
             return "Storage is not available"
-        case .compressionFailed(let reason):
-            return "Compression failed: \(reason)"
-        case .permissionDenied(let permission):
-            return "Permission denied: \(permission.rawValue)"
+        case .networkFailed(let reason):
+            return "Network request failed: \(reason)"
+        case .invalidData:
+            return "The data could not be read"
         }
     }
 }
@@ -241,37 +231,6 @@ struct MyView: View {
             }
     }
 }
-```
-
-## NoCloud BS Color System
-
-Plugins must use the host app's color palette. Until the DesignSystem Swift Package
-is available as a public dependency, define these as local Color extensions:
-
-```swift
-// Color+NoCloudBS.swift — Plugin color constants
-import SwiftUI
-
-extension Color {
-    static let ncbsBlack = Color(red: 0, green: 0, blue: 0)
-    static let ncbsBlackGold = Color(red: 0.102, green: 0.078, blue: 0)
-    static let ncbsGold = Color(red: 0.812, green: 0.710, blue: 0.231)
-    static let ncbsGoldLight = Color(red: 0.910, green: 0.831, blue: 0.545)
-    static let ncbsGoldDark = Color(red: 0.545, green: 0.478, blue: 0.169)
-    static let ncbsTeal = Color(red: 0, green: 0.502, blue: 0.502)
-    static let ncbsTealLight = Color(red: 0.251, green: 0.878, blue: 0.816)
-    static let ncbsTealDark = Color(red: 0, green: 0.373, blue: 0.373)
-    static let ncbsError = Color(red: 1, green: 0.271, blue: 0.227)
-    static let ncbsSuccess = Color(red: 0.188, green: 0.820, blue: 0.345)
-    static let ncbsWarning = Color(red: 1, green: 0.839, blue: 0.039)
-}
-```
-
-Use these in ALL views — no custom colors. Examples:
-```swift
-.background(Color.ncbsBlackGold)       // card backgrounds
-.foregroundStyle(Color.ncbsGold)        // primary accent text
-.tint(Color.ncbsTeal)                   // toggles, secondary buttons
 ```
 
 ## Accessibility Patterns
@@ -341,50 +300,5 @@ platforms: [.iOS(.v17), .macOS(.v14)]
 - **Types**: PascalCase (`ItemListViewModel`, `StorageService`)
 - **Properties/Methods**: camelCase (`isLoading`, `loadItems()`)
 - **Constants**: camelCase (`let maxItems = 100`)
-- **Protocols**: PascalCase with descriptive suffix (`CompressionServiceProtocol`)
+- **Protocols**: PascalCase with descriptive suffix (`StorageServiceProtocol`)
 - **Files**: Match type name (`ItemListViewModel.swift`)
-- **Packages**: Prefixed with `NCBS` (`NCBSPhotoGallery`)
-- **Plugin IDs**: Reverse DNS (`com.nocloudbs.photo-gallery`)
-
-## Common UI Components
-
-### Storage Gauge
-
-```swift
-struct StorageGaugeView: View {
-    let used: Int64
-    let total: Int64
-
-    private var percentage: Double {
-        guard total > 0 else { return 0 }
-        return Double(used) / Double(total)
-    }
-
-    var body: some View {
-        Gauge(value: percentage) {
-            Text("Storage")
-        } currentValueLabel: {
-            Text(ByteCountFormatter.string(fromByteCount: used, countStyle: .file))
-        }
-        .gaugeStyle(.accessoryCircular)
-    }
-}
-```
-
-### Compression Badge
-
-```swift
-struct CompressionBadge: View {
-    let ratio: Double
-
-    var body: some View {
-        Label("\(ratio, specifier: "%.1f")x", systemImage: "arrow.down.right.and.arrow.up.left")
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.green.opacity(0.15))
-            .foregroundStyle(.green)
-            .clipShape(Capsule())
-    }
-}
-```
