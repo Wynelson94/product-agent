@@ -536,7 +536,8 @@ def build_product(
     enrich_url: str | None = None,
     build_mode: str = "standard",
     verbose: bool = False,
-) -> str | None:
+    json_output: bool = False,
+) -> str | dict | None:
     """Run the autonomous product agent.
 
     v8.0: Uses phase-by-phase orchestration via claude-code-sdk by default.
@@ -575,6 +576,29 @@ def build_product(
             resume_from=resume_checkpoint,
         )
         result = asyncio.run(build_product_v8(idea, project_dir, build_cfg))
+
+        # v12.1: Return structured dict for Shipwright JSON output mode
+        if json_output:
+            return {
+                "success": result.success,
+                "url": result.url,
+                "quality": result.quality,
+                "duration_s": result.duration_s,
+                "test_count": result.test_count,
+                "spec_coverage": result.spec_coverage,
+                "reason": result.reason,
+                "phase_results": [
+                    {
+                        "phase_name": pr.phase_name,
+                        "success": pr.success,
+                        "duration_s": pr.duration_s,
+                        "detail": pr.detail,
+                        "num_turns": pr.num_turns,
+                    }
+                    for pr in result.phase_results
+                ],
+            }
+
         if result.success:
             parts = []
             if result.url:
@@ -1068,6 +1092,20 @@ Requirements:
         help="Show detailed progress output"
     )
 
+    # v12.1: Shipwright integration flags
+    parser.add_argument(
+        "--json-output",
+        action="store_true",
+        help="Output BuildResult as JSON to stdout (for programmatic use by Shipwright plugin)"
+    )
+
+    parser.add_argument(
+        "--progress-mode",
+        choices=["technical", "friendly"],
+        default="technical",
+        help="Progress output style: technical (default) or friendly (emoji, beginner-friendly)"
+    )
+
     # Enhancement mode arguments
     parser.add_argument(
         "--design-file",
@@ -1146,6 +1184,10 @@ Requirements:
     if enrich:
         os.environ["ENABLE_PROMPT_ENRICHMENT"] = "true"
 
+    # v12.1: Set progress mode for Shipwright integration
+    if args.progress_mode == "friendly":
+        os.environ["PROGRESS_MODE"] = "friendly"
+
     result = build_product(
         args.idea,
         args.project_dir,
@@ -1160,7 +1202,19 @@ Requirements:
         enrich_url=args.enrich_url,
         build_mode=args.mode,
         verbose=getattr(args, 'verbose', False),
+        json_output=args.json_output,
     )
+
+    # v12.1: JSON output mode — print structured result and exit
+    if args.json_output:
+        import json
+        if isinstance(result, dict):
+            print(json.dumps(result))
+            sys.exit(0 if result.get("success") else 1)
+        else:
+            # Fallback: legacy mode returned a string, wrap it
+            print(json.dumps({"success": result is not None, "output": result}))
+            sys.exit(0 if result else 1)
 
     if result:
         print("", file=sys.stderr)
