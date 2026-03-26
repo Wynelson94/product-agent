@@ -316,3 +316,48 @@ def check_claude_cli() -> tuple[bool, str]:
         return False, "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
     except Exception as e:
         return False, str(e)
+
+
+def check_claude_auth() -> tuple[bool, str]:
+    """Verify that Claude Code is authenticated (subscription or API key).
+
+    Runs a lightweight `claude -p "ok" --max-turns 1` to confirm auth works
+    before starting expensive multi-phase builds. This catches expired OAuth
+    tokens and missing subscriptions early rather than failing 5 minutes in.
+
+    Returns:
+        Tuple of (is_authenticated, detail_or_error)
+    """
+    import os as _os
+
+    # Build env overrides matching cli_runner behavior — strip API key
+    # unless PRODUCT_AGENT_USE_API_KEY is set, so we test the same auth
+    # path the actual build will use.
+    use_api_key = _os.environ.get("PRODUCT_AGENT_USE_API_KEY", "").lower() == "true"
+    env = _os.environ.copy()
+    if not use_api_key:
+        env.pop("ANTHROPIC_API_KEY", None)
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", "ok", "--output-format", "json", "--max-turns", "1"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if result.returncode == 0:
+            return True, "Authenticated"
+        # Common auth failure messages from Claude Code
+        stderr = result.stderr or ""
+        if "not logged in" in stderr.lower() or "auth" in stderr.lower():
+            return False, "Claude Code is not logged in. Run: claude login"
+        if "subscription" in stderr.lower() or "plan" in stderr.lower():
+            return False, "No active Claude Code subscription found. You need a Pro or Max plan."
+        return False, stderr.strip() or "Authentication check failed"
+    except subprocess.TimeoutExpired:
+        return False, "Auth check timed out — Claude Code may be stuck. Try: claude login"
+    except FileNotFoundError:
+        return False, "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+    except Exception as e:
+        return False, str(e)

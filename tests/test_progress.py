@@ -221,12 +221,20 @@ class TestPhaseStart:
         output = buf.getvalue()
         assert "[1/9]" in output
 
-    def test_output_starts_with_carriage_return(self):
-        """Test that output uses carriage return for overwrite."""
+    def test_output_uses_newline_for_non_tty(self):
+        """Test that non-TTY output uses newline instead of carriage return.
+
+        v12.2: StringIO is not a TTY, so progress lines should end with \\n
+        instead of starting with \\r. This ensures clean output when spawned
+        from pipes (e.g., Shipwright calling Product Agent via Bash tool).
+        """
         buf = io.StringIO()
         reporter = ProgressReporter(output=buf)
         reporter.phase_start("scaffold")
-        assert buf.getvalue().startswith("\r")
+        # Non-TTY: no \r prefix, ends with \n
+        output = buf.getvalue()
+        assert not output.startswith("\r")
+        assert output.endswith("\n")
 
     def test_sequential_starts_increment_correctly(self):
         """Test counter increments across multiple phase_start calls."""

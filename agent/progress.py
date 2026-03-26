@@ -56,6 +56,8 @@ class ProgressReporter:
 
     Outputs formatted progress lines as phases complete.
     v12.1: Supports friendly mode for Shipwright beginner-facing output.
+    v12.2: TTY detection — uses \\n instead of \\r when stderr is not a terminal
+           (e.g., when spawned from Claude Code's Bash tool via Shipwright).
     """
     verbose: bool = False
     output: TextIO = field(default_factory=lambda: sys.stderr)
@@ -65,6 +67,12 @@ class ProgressReporter:
     _results: list[PhaseResult] = field(default_factory=list)
     # v12.1: Friendly mode for Shipwright — set via PROGRESS_MODE env var
     _friendly: bool = field(default_factory=lambda: os.environ.get("PROGRESS_MODE") == "friendly")
+    # v12.2: When output is not a TTY (pipe, file), use newline instead of
+    # carriage return so progress lines don't pile up as garbled text.
+    _is_tty: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._is_tty = hasattr(self.output, "isatty") and self.output.isatty()
 
     def set_total_phases(self, total: int) -> None:
         """Set the total number of phases (varies by build mode)."""
@@ -74,20 +82,26 @@ class ProgressReporter:
         """Report that a phase is starting."""
         self._phase_count += 1
 
+        # \r overwrites the current line (TTY); \n appends a new line (pipe/file)
+        prefix = "\r" if self._is_tty else ""
+        suffix = "" if self._is_tty else "\n"
+
         if self._friendly:
             # v12.1: Beginner-friendly output for Shipwright
             friendly = _FRIENDLY_PHASE_NAMES.get(phase_name.lower(), f"{phase_name}...")
-            self.output.write(f"\r{friendly:<60}")
+            self.output.write(f"{prefix}{friendly:<60}{suffix}")
         else:
             label = f"[{self._phase_count}/{self._total_phases}]"
             msg = f"{label} {phase_name}..."
-            # \r = carriage return: overwrites current line for in-place progress updates
-            self.output.write(f"\r{msg:<55}")
+            self.output.write(f"{prefix}{msg:<55}{suffix}")
         self.output.flush()
 
     def phase_complete(self, result: PhaseResult) -> None:
         """Report that a phase completed."""
         self._results.append(result)
+
+        # \r overwrites the in-progress line on TTY; on pipe just write a new line
+        prefix = "\r" if self._is_tty else ""
 
         if self._friendly:
             # v12.1: Beginner-friendly completion messages
@@ -95,14 +109,14 @@ class ProgressReporter:
             friendly_done = _FRIENDLY_PHASE_DONE.get(phase_key, "Done")
             detail = f" — {result.detail}" if result.detail else ""
             status_icon = "OK" if result.success else "!!"
-            self.output.write(f"\r{friendly_done}{detail:<50} {status_icon}\n")
+            self.output.write(f"{prefix}{friendly_done}{detail:<50} {status_icon}\n")
         else:
             label = f"[{self._phase_count}/{self._total_phases}]"
             status = "done" if result.success else "FAIL"
             duration = _format_duration(result.duration_s)
             detail = f" {result.detail}" if result.detail else ""
             line = f"{label} {result.phase_name}...{detail}"
-            self.output.write(f"\r{line:<55} {status} {duration:>6}\n")
+            self.output.write(f"{prefix}{line:<55} {status} {duration:>6}\n")
         self.output.flush()
 
     def phase_parallel_complete(self, results: list[PhaseResult]) -> None:
@@ -114,7 +128,8 @@ class ProgressReporter:
             duration = _format_duration(result.duration_s)
             detail = f" {result.detail}" if result.detail else ""
             line = f"{label} {result.phase_name}...{detail}"
-            self.output.write(f"\r{line:<55} {status} {duration:>6}  (parallel)\n")
+            prefix = "\r" if self._is_tty else ""
+            self.output.write(f"{prefix}{line:<55} {status} {duration:>6}  (parallel)\n")
             self.output.flush()
 
     def phase_skipped(self, phase_name: str, detail: str = "") -> None:
@@ -127,7 +142,8 @@ class ProgressReporter:
         label = f"[{self._phase_count}/{self._total_phases}]"
         detail_str = f" ({detail})" if detail else ""
         line = f"{label} {phase_name}...skipped{detail_str}"
-        self.output.write(f"\r{line:<55}\n")
+        prefix = "\r" if self._is_tty else ""
+        self.output.write(f"{prefix}{line:<55}\n")
         self.output.flush()
 
     def build_header(self, idea: str, version: str = "8.0") -> None:

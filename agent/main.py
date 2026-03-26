@@ -27,7 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-from .cli_runner import run_claude, check_claude_cli
+from .cli_runner import run_claude, check_claude_cli, check_claude_auth
 from .agents.definitions import get_agents, get_agent_prompt
 from .mcp.servers import get_mcp_servers, get_mcp_config_json
 from .state import AgentState, Phase, ReviewStatus, create_initial_state, get_next_phase
@@ -1163,6 +1163,18 @@ Requirements:
         sys.exit(1)
 
     print(f"Using Claude Code: {cli_info}", file=sys.stderr)
+
+    # v12.2: Auth pre-flight check — verify subscription/login before
+    # starting 9 expensive phase calls that would all fail if not authenticated.
+    print("Verifying authentication...", file=sys.stderr)
+    auth_ok, auth_detail = check_claude_auth()
+    if not auth_ok:
+        print(f"ERROR: {auth_detail}", file=sys.stderr)
+        if args.json_output:
+            import json
+            print(json.dumps({"success": False, "reason": auth_detail}))
+        sys.exit(1)
+    print(f"  {auth_detail}", file=sys.stderr)
 
     # Set checkpoint environment variable
     if args.checkpoints:
