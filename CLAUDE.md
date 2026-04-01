@@ -225,8 +225,7 @@ Current count: 1,544+ unit tests across 35 test files (excludes stress tests tha
 ## Quick Start for Development
 
 ```bash
-cd /Users/natenelson/Projects/product-agent
 pip install -e ".[dev]"
-python3 -m pytest tests/ -x          # Verify everything works
-product-agent "Build me a todo app"  # Run a test build
+python3 -m pytest tests/ -x -m "not stress"   # Verify all unit tests pass
+product-agent "Build me a todo app"            # Run a test build
 ```

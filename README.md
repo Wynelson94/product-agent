@@ -67,14 +67,22 @@ cd product-agent
 pip install -e .
 ```
 
-### 2. Set Environment Variables
+### 2. Authentication
+
+Product Agent runs through **Claude Code** using your existing subscription (Pro or Max). No API key is needed — just make sure you're logged into Claude Code:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...  # Required
+claude login
+```
+
+Optional environment variables for integrations:
+```bash
 export GITHUB_TOKEN=ghp_...          # Optional - GitHub MCP
 export SUPABASE_ACCESS_TOKEN=...     # Optional - Supabase MCP
 export VERCEL_TOKEN=...              # Optional - Vercel MCP
 ```
+
+> **Note**: Product Agent automatically uses your Claude Code subscription. It does NOT require an `ANTHROPIC_API_KEY`. If you have one set in your shell profile, it will be ignored to avoid unexpected API charges.
 
 ### 3. Run
 
