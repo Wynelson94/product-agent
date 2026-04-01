@@ -106,3 +106,7 @@ BUILD_TIMEOUT_PER_TABLE_S = int(get_env("BUILD_TIMEOUT_PER_TABLE_S", "120"))
 
 # v9.1: Crash recovery — verify artifact SHA-256 hashes on --resume
 ENABLE_ARTIFACT_VERIFICATION = get_env("ENABLE_ARTIFACT_VERIFICATION", "true").lower() == "true"
+
+# v12.4: Strict artifact verification — abort build if artifacts were modified
+# since checkpoint. Enterprise hardening: prevents resuming from tampered state.
+STRICT_ARTIFACT_VERIFICATION = get_env("STRICT_ARTIFACT_VERIFICATION", "false").lower() == "true"

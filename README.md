@@ -1,4 +1,4 @@
-# Product Agent v11.1
+# Product Agent v12.4
 
 An autonomous AI agent that builds, tests, and deploys web and native iOS applications from plain English descriptions.
 
@@ -10,7 +10,7 @@ product-agent "Build me a todo app with user authentication"
 
 **Output:**
 ```
-Product Agent v11.1 — Building: "Build me a todo app with user authentication"
+Product Agent v12.4 — Building: "Build me a todo app with user authentication"
 
 [1/9] Enriching prompt...                    done   12s
 [2/9] Analyzing stack... → nextjs-supabase   done    8s
@@ -31,34 +31,31 @@ BUILD COMPLETE  5m 42s
 
 One prompt in, production app out. No human intervention required.
 
-## What's New in v11.0
+## What's New in v12.4
 
-### New Tech Stacks (v11.0)
-Three new stacks, expanding from 5 to 8 options:
-- **Django + HTMX** — Python web framework with server-rendered interactivity. Best for admin panels, data apps, and Python-native teams. Deploys to Railway.
-- **SvelteKit** — Lightweight modern JS framework with Svelte 5 runes. Best for fast SaaS, dashboards, and rapid prototypes. Deploys to Vercel.
-- **Astro** — Content-first framework with islands architecture. Best for blogs, docs, landing pages, and marketing sites. Deploys to Vercel.
-
-### Pipeline Features (v11.1)
-- **AI App Domain** — New domain pattern for AI-powered apps with AI SDK v6 patterns (streamText, useChat, structured output, chat history schema). The agent now knows how to build chatbots, AI assistants, and AI tools.
-- **CI/CD Generation** — Deploy templates now include GitHub Actions workflows for automated testing on PRs. Generated apps ship with CI out of the box.
-- **Observability** — Next.js deploy templates now include Vercel Analytics and Speed Insights setup. Built apps get production monitoring from day one.
-
-### Enhancement Mode (v10.2)
-The enhancer agent (previously defined but never connected) is now fully wired into the pipeline. Enhancement mode runs: setup → ENHANCE → Build → Audit → Test → Deploy → Verify.
-
-### Template Modernization (v10.3)
-- Next.js templates updated for v16: `--yes`/`--turbopack` flags, `proxy.ts` notes, async request APIs, Cache Components (`'use cache'`)
-- Swift templates clarify `@Observable` vs `@Published` to prevent silent bugs
-- Expo templates add explicit `expo-router` installation
+### Enterprise Security Audit (v12.4)
+Comprehensive security hardening for production/demo readiness:
+- **Review validation fix** — Missing or garbled REVIEW.md no longer silently auto-approves designs. Failed review calls trigger revision instead of bypass.
+- **Sanitization hardened** — 11 injection patterns (synced with Shipwright hooks), zero-width unicode stripping, NFC normalization, HTML entity detection.
+- **Recovery patterns** — Added Next.js 16 (`proxy.ts` migration, `'use cache'`) and Tailwind CSS 4.x error recovery.
+- **Retry backoff** — Linear backoff (5s, 10s, 15s...) between build attempts to avoid hammering transient failures.
+- **JSONL rotation** — Build history auto-rotates at 500 records with `fcntl.flock()` file locking for concurrent safety.
+- **Checkpoint cleanup** — Old checkpoints cleaned up after successful builds.
+- **Strict artifact verification** — New `STRICT_ARTIFACT_VERIFICATION` config flag aborts builds on tampered checkpoint artifacts (enterprise hardening).
+- **Dependency pinning** — All dependencies have upper bounds to prevent supply chain attacks.
 
 ### Previous Versions
-- **v10.0** — Post-mortem fixes: dependency audit, data wiring verification, RLS circular dep prevention, CRITICAL override
-- **v9.1** — Crash recovery: `--resume` in v8+ mode, atomic checkpoints, artifact verification
-- **v9.0** — Reliability overhaul: honest quality scoring, YAML contracts, SDK logging, timeouts, input sanitization, per-stack templates, failure learning
-- **v8.0** — Phase-by-phase orchestration, build memory, quality scoring, parallel audit+test, public API
-- **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest integration
-- **v6.0** — Spec audit, prompt enrichment, original prompt passthrough, content site domain
+- **v12.3** — PyPI publish workflow, public release prep
+- **v11.1** — AI app domain, CI/CD generation, Vercel Analytics observability
+- **v11.0** — 3 new stacks: Django+HTMX, SvelteKit, Astro (8 stacks total)
+- **v10.3** — Template modernization: Next.js 16 patterns, async APIs, Cache Components
+- **v10.2** — Enhancement mode fully wired into pipeline
+- **v10.0** — Post-mortem fixes: dependency audit, data wiring, RLS circular deps, CRITICAL override
+- **v9.1** — Crash recovery: `--resume`, atomic checkpoints, artifact verification
+- **v9.0** — Reliability overhaul: quality scoring, YAML contracts, SDK logging, timeouts
+- **v8.0** — Phase-by-phase orchestration, build memory, quality scoring, public API
+- **v7.0** — Swift/SwiftUI stack, plugin build mode, NCBSPlugin protocol, XCTest
+- **v6.0** — Spec audit, prompt enrichment, content site domain
 - **v5.0** — Deployment validation, verification, checkpoints, automated testing
 
 ## Quick Start
@@ -361,7 +358,7 @@ pip install -e ".[dev]"
 python3 -m pytest tests/ -v
 ```
 
-1,627 tests across 22 test files:
+1,544+ unit tests across 35 test files (plus stress tests requiring live SDK calls):
 
 | Test File | Tests | Coverage |
 |-----------|-------|---------|
@@ -422,23 +419,26 @@ Options:
 
 ## Safety Features
 
-The agent includes safety hooks that:
-- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes) with shell-aware splitting that respects quoted strings
-- **Protect** system directories and credentials
+The agent includes enterprise-grade safety hooks:
+- **Block** dangerous commands (`rm -rf /`, fork bombs, disk writes, `sudo`, `eval`, piped downloads) with shell-aware splitting that respects quoted strings
+- **Protect** system directories (`/etc`, `/usr`, `/System`) and credential files (`.ssh`, `.aws`, `.pem`, `.key`, `.p12`, `.pfx`)
 - **Auto-approve** safe operations (npm, git, file writes in project)
 - **Validate** deployment compatibility (SQLite + Vercel = blocked)
-- **Sanitize** user input before prompt injection (strips injection markers, caps length, removes control chars)
+- **Sanitize** user input with 11 injection patterns, zero-width unicode stripping, NFC normalization, HTML entity detection, and 5,000-char length cap
 - **Limit** total tool turns per build (300) and per phase to prevent infinite loops
+- **Rotate** build history logs at 500 records with file locking for concurrent safety
+- **Verify** checkpoint artifact integrity with SHA-256 hashes (optional strict mode aborts on mismatch)
 
 ## Version History
 
 | Version | Description |
 |---------|-------------|
-| **v11.1** | **AI app domain, CI/CD generation, Vercel Analytics observability** |
-| **v11.0** | **3 new stacks: Django+HTMX, SvelteKit, Astro. 8 stacks total** |
+| **v12.4** | **Enterprise audit: security hardening, review validation fix, encoded attack detection, retry backoff, JSONL rotation, dependency pinning** |
+| **v12.3** | **PyPI publish workflow, public release prep** |
+| **v11.1** | AI app domain, CI/CD generation, Vercel Analytics observability |
+| **v11.0** | 3 new stacks: Django+HTMX, SvelteKit, Astro. 8 stacks total |
 | v10.3 | Template modernization: Next.js 16 patterns, async APIs, Cache Components |
 | v10.2 | Enhancement mode fully wired into pipeline |
-| v10.1 | Audit fixes: version, template bugs, test coverage |
 | v10.0 | Post-mortem fixes: dependency audit, data wiring, RLS circular deps, CRITICAL override |
 | v9.1 | Crash recovery: `--resume`, atomic checkpoints, artifact verification |
 | v9.0 | Reliability overhaul: quality scoring, YAML contracts, SDK logging, timeouts |

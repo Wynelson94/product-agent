@@ -2,8 +2,13 @@
 
 Tracks every build's decisions and outcomes in an append-only log.
 Queries similar past builds to inject context and failure lessons into new builds.
+
+v12.4: Added file locking (fcntl.flock) for concurrent write safety and
+JSONL rotation to prevent unbounded growth. MAX_BUILD_RECORDS controls
+the rotation threshold (default 500).
 """
 
+import fcntl
 import json
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -13,6 +18,11 @@ from typing import Optional
 
 HISTORY_DIR = ".agent_history"
 BUILDS_FILE = "builds.jsonl"
+
+# Maximum number of build records to retain. When exceeded, the oldest
+# records are dropped during the next write. 500 records ≈ 250KB on disk,
+# which loads in <50ms even on slow storage.
+MAX_BUILD_RECORDS = 500
 
 
 @dataclass
@@ -51,25 +61,80 @@ class BuildHistory:
         self.builds_file = self.history_dir / BUILDS_FILE
 
     def record_build(self, record: BuildRecord) -> None:
-        """Append a build record to the history log."""
+        """Append a build record to the history log.
+
+        Uses fcntl.flock() for exclusive locking so concurrent builds don't
+        interleave JSONL lines. Also triggers rotation when the file exceeds
+        MAX_BUILD_RECORDS to prevent unbounded growth.
+        """
         if not record.timestamp:
             record.timestamp = datetime.now().isoformat()
         if not record.id:
             record.id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+        line = json.dumps(asdict(record)) + "\n"
+
         with open(self.builds_file, "a") as f:
-            f.write(json.dumps(asdict(record)) + "\n")
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write(line)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+        # Rotate if the file has grown too large
+        self._rotate_if_needed()
+
+    def _rotate_if_needed(self) -> None:
+        """Drop oldest records when the file exceeds MAX_BUILD_RECORDS.
+
+        Reads all lines, keeps the most recent MAX_BUILD_RECORDS, and
+        atomically rewrites the file. Uses exclusive lock during rewrite.
+        """
+        if not self.builds_file.exists():
+            return
+
+        lines = self.builds_file.read_text().strip().split("\n")
+        lines = [l for l in lines if l.strip()]
+
+        if len(lines) <= MAX_BUILD_RECORDS:
+            return
+
+        # Keep the most recent records (bottom of the file = newest)
+        kept = lines[-MAX_BUILD_RECORDS:]
+
+        # Atomic rewrite with exclusive lock
+        with open(self.builds_file, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write("\n".join(kept) + "\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
     def get_all_builds(self) -> list[BuildRecord]:
-        """Load all build records."""
+        """Load all build records.
+
+        Uses a shared lock so concurrent reads don't conflict with writes.
+        Skips malformed lines instead of crashing.
+        """
         if not self.builds_file.exists():
             return []
 
         records = []
-        for line in self.builds_file.read_text().strip().split("\n"):
+        with open(self.builds_file, "r") as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                content = f.read()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+        for line in content.strip().split("\n"):
             if line.strip():
-                data = json.loads(line)
-                records.append(BuildRecord(**data))
+                try:
+                    data = json.loads(line)
+                    records.append(BuildRecord(**data))
+                except (json.JSONDecodeError, TypeError):
+                    # Skip malformed lines — don't crash on corrupted history
+                    continue
         return records
 
     def find_similar_builds(

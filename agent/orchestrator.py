@@ -142,10 +142,18 @@ async def build_product(
                 state.stack_id = cfg.stack
             state.build_mode = cfg.mode
             progress.build_resume_header(idea, state.phase.value)
-            # Verify artifacts haven't been tampered with (warning only)
+            # Verify artifacts haven't been tampered with since checkpoint.
+            # Default: warning only. Set STRICT_ARTIFACT_VERIFICATION=true to
+            # abort the build if artifacts were modified (enterprise hardening).
             if config.ENABLE_ARTIFACT_VERIFICATION:
                 all_ok, mismatched = checkpoint_mgr.verify_artifacts(checkpoint_id)
                 if not all_ok:
+                    strict = getattr(config, 'STRICT_ARTIFACT_VERIFICATION', False)
+                    if strict:
+                        return _build_failed(
+                            progress, "Artifact integrity check failed",
+                            f"Modified since checkpoint: {', '.join(mismatched)}"
+                        )
                     progress.log(
                         f"Warning: artifacts changed since checkpoint: {', '.join(mismatched)}"
                     )
@@ -299,11 +307,21 @@ async def build_product(
                 )
                 _track_turns(call)
                 if not call.success:
-                    progress.log("Review call failed — treating as approved")
-                    approved = True
-                    break
+                    # SECURITY: Failed review calls should NOT skip review.
+                    # Previously treated as approved, meaning a crash during
+                    # review would bypass all design validation. Now we log
+                    # the failure and let the loop continue to the next revision
+                    # or exhaust max_revisions.
+                    progress.log(f"Review call failed: {call.error} — treating as needs revision")
+                    if revision >= max_revisions:
+                        progress.log("Max revisions reached after review failure — proceeding with current design")
+                        break
+                    continue
 
-                if review_validation.extracted.get("approved", True):
+                # SECURITY: Default to False (not approved) when the validator
+                # doesn't set a verdict. Previously defaulted to True, which meant
+                # a missing or garbled REVIEW.md silently skipped design review.
+                if review_validation.extracted.get("approved", False):
                     approved = True
                     state.review_status = ReviewStatus.APPROVED
                     break
@@ -376,6 +394,14 @@ async def build_product(
 
             for attempt in range(max_attempts):
                 state.build_attempts = attempt + 1
+
+                # v12.4: Back off between retries to avoid hammering transient
+                # failures (npm registry, Supabase API, rate limits). First
+                # attempt has no delay; subsequent attempts wait 5s, 10s, 15s...
+                if attempt > 0:
+                    backoff_s = attempt * 5
+                    progress.log(f"Waiting {backoff_s}s before retry...")
+                    await asyncio.sleep(backoff_s)
 
                 call, validation = await run_phase(
                     Phase.BUILD, state, project_path, progress,
@@ -552,6 +578,10 @@ async def build_product(
         # Build complete
         # ---------------------------------------------------------------
         state.mark_completed(state.deployment_url)
+
+        # v12.4: Clean up old checkpoints on successful builds to prevent
+        # unbounded disk growth. Keeps the 5 most recent checkpoints.
+        checkpoint_mgr.cleanup()
 
         # Compute quality score
         quality_report = compute_quality_score(state)

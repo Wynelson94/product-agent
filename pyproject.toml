@@ -1,6 +1,6 @@
 [project]
 name = "product-agent"
-version = "12.3.0"
+version = "12.4.0"
 description = "Autonomous AI agent that builds, tests, and deploys web and native iOS applications from ideas"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -11,15 +11,15 @@ authors = [
 keywords = ["ai", "agent", "claude", "nextjs", "supabase", "swift", "swiftui", "ios", "automation"]
 
 dependencies = [
-    "claude-code-sdk>=0.0.10",
+    "claude-code-sdk>=0.1.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
+    "pytest>=7.0.0,<9.0.0",
+    "pytest-asyncio>=0.21.0,<1.0.0",
+    "black>=23.0.0,<25.0.0",
+    "ruff>=0.1.0,<1.0.0",
 ]
 
 [project.scripts]

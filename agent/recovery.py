@@ -78,6 +78,29 @@ BUILD_ERROR_PATTERNS: dict[str, dict] = {
         "type": "config_error",
         "action": "fix_config",
     },
+
+    # v12.4: Next.js 16 migration patterns
+    r"middleware\.ts.*is not supported|Cannot use middleware\.ts": {
+        "type": "nextjs16_middleware",
+        "action": "rename_middleware_to_proxy",
+    },
+    r"proxy\.ts.*not found|Cannot find.*proxy": {
+        "type": "nextjs16_proxy_missing",
+        "action": "create_proxy_ts",
+    },
+    r"'use cache'.*not.*valid|Unexpected.*use cache": {
+        "type": "nextjs16_cache_directive",
+        "action": "fix_cache_directive",
+    },
+    # Tailwind CSS 4.x migration
+    r"tailwind\.config\.[jt]s.*deprecated|Cannot find.*tailwind\.config": {
+        "type": "tailwind4_config",
+        "action": "fix_tailwind_config",
+    },
+    r"@tailwind.*base.*not recognized|Unknown at rule.*@tailwind": {
+        "type": "tailwind4_directives",
+        "action": "fix_tailwind_import",
+    },
 }
 
 # Patterns for deployment errors
@@ -254,6 +277,55 @@ Original error: {original_error}"""
 1. Ensure the component is a valid function or class component
 2. Check that it returns valid JSX
 3. Verify 'use client' directive if using hooks
+
+Original error: {original_error}"""
+
+    elif action == "rename_middleware_to_proxy":
+        # v12.4: Next.js 16 renamed middleware.ts to proxy.ts
+        return f"""Next.js 16 renamed middleware.ts to proxy.ts.
+
+1. Rename the file: mv src/middleware.ts src/proxy.ts (or middleware.ts to proxy.ts)
+2. proxy.ts runs on Node.js runtime only (not edge)
+3. Place proxy.ts at the same level as app/ (project root or inside src/)
+4. Update any imports that reference middleware
+
+Original error: {original_error}"""
+
+    elif action == "create_proxy_ts":
+        return f"""Next.js 16 requires proxy.ts (not middleware.ts) for request interception.
+
+1. Create proxy.ts at the same level as app/ directory
+2. proxy.ts runs on Node.js runtime (full Node.js API access)
+3. Use the same matcher pattern as the old middleware.ts
+4. If using Clerk: import {{ clerkMiddleware }} from '@clerk/nextjs/server'
+
+Original error: {original_error}"""
+
+    elif action == "fix_cache_directive":
+        return f"""The 'use cache' directive requires Next.js 16 with proper configuration.
+
+1. Ensure next.config.ts has: {{ experimental: {{ cacheComponents: true }} }}
+2. 'use cache' replaces PPR for mixing static and dynamic content
+3. Use cacheLife() and cacheTag() for fine-grained control
+
+Original error: {original_error}"""
+
+    elif action == "fix_tailwind_config":
+        return f"""Tailwind CSS 4.x changed configuration format.
+
+1. Tailwind 4 uses CSS-based configuration instead of tailwind.config.js
+2. Remove tailwind.config.js/ts if present
+3. Add configuration in your main CSS file using @theme directive
+4. Or install @tailwindcss/postcss and use the PostCSS plugin approach
+
+Original error: {original_error}"""
+
+    elif action == "fix_tailwind_import":
+        return f"""Tailwind CSS 4.x changed import syntax.
+
+1. Replace @tailwind directives with: @import "tailwindcss"
+2. In CSS file, use: @import "tailwindcss" instead of @tailwind base/components/utilities
+3. If using PostCSS, ensure @tailwindcss/postcss is installed
 
 Original error: {original_error}"""
 

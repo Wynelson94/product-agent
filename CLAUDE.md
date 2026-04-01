@@ -8,7 +8,7 @@ Read this before making any changes.
 ## Golden Rules
 
 1. **Read before you write.** Never modify a file without reading it first. Understand existing code before changing it.
-2. **Test before you commit.** Always run `python3 -m pytest tests/ -x` and confirm all 1,544+ tests pass before committing.
+2. **Test before you commit.** Always run `python3 -m pytest tests/ -x -m "not stress"` and confirm all 1,544+ unit tests pass before committing.
 3. **Commit after every meaningful change.** Don't batch everything into one giant commit at the end. Each logical change gets its own commit with a descriptive message.
 4. **Comment the why, not just the what.** Every function gets a docstring. Every non-obvious line gets an inline `#` comment explaining *why* it exists, not just what it does.
 5. **Keep comments current.** When you change code, update its comments. Stale comments are worse than no comments.
@@ -42,7 +42,7 @@ Enrich → Analyze → Design ←→ Review → Build → Audit ─┐
 ```
 
 1. **Enrich** — Research domain, expand idea into detailed spec (optional)
-2. **Analyze** — Select optimal tech stack from 5 options
+2. **Analyze** — Select optimal tech stack from 8 options
 3. **Design** — Create data model, pages, components → DESIGN.md
 4. **Review** — Validate design (loops back to Design if NEEDS_REVISION, max 3 times)
 5. **Build** — Implement full application (max 5 attempts, errors injected into retries)
@@ -218,7 +218,7 @@ python3 -m pytest tests/ -k "test_quality" -v
 ```
 
 Tests live in `tests/`. Each `agent/*.py` module has a corresponding `tests/test_*.py` file.
-Current count: 1,544 tests across 30 test files.
+Current count: 1,544+ unit tests across 35 test files (excludes stress tests that require live SDK calls).
 
 ---
 

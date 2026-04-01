@@ -132,10 +132,10 @@ def _validate_enrich(project_dir: Path) -> ValidationResult:
 
     content = prompt_md.read_text()
     if len(content) < 100:
-        # NOTE: add_error records the message but doesn't flip passed=False.
-        # This is intentional — enrichment is non-fatal (orchestrator line ~175
-        # continues even if enrichment fails). A short PROMPT.md is a warning,
-        # not a build-stopping error.
+        # NOTE: add_error DOES set passed=False (see ValidationResult.add_error).
+        # This is fine because enrichment is non-fatal — the orchestrator continues
+        # even if enrichment validation fails. The error is recorded for debugging
+        # but doesn't block the build pipeline.
         result.add_error(f"PROMPT.md too short ({len(content)} chars) — enrichment may have failed")
 
     result.add_info(f"PROMPT.md exists ({len(content)} chars)")
@@ -394,8 +394,11 @@ def _validate_review(project_dir: Path) -> ValidationResult:
     review_file = project_dir / "REVIEW.md"
 
     if not review_file.exists():
-        # Review might be communicated via other means
-        result.add_info("REVIEW.md not found — reviewer may have communicated directly")
+        # SECURITY: Default to not-approved when REVIEW.md is missing.
+        # The orchestrator uses extracted.get("approved", False) so this is
+        # belt-and-suspenders — but explicit is safer than relying on defaults.
+        result.extracted["approved"] = False
+        result.add_info("REVIEW.md not found — treating as not approved")
         return result
 
     content = review_file.read_text()
