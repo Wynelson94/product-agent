@@ -235,7 +235,7 @@ product-agent --stack swift-swiftui --mode plugin \
 
 # iOS host app
 product-agent --stack swift-swiftui --mode host \
-  "NoCloud BS host app with plugin system"
+  "SaaS dashboard with team management and analytics"
 ```
 
 ### Other Options
