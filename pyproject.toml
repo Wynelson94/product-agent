@@ -19,14 +19,14 @@ classifiers = [
     "Topic :: Software Development :: Code Generators",
 ]
 
+dependencies = [
+    "claude-code-sdk>=0.1.0,<2.0.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/Wynelson94/product-agent"
 Repository = "https://github.com/Wynelson94/product-agent"
 "Bug Tracker" = "https://github.com/Wynelson94/product-agent/issues"
-
-dependencies = [
-    "claude-code-sdk>=0.1.0,<2.0.0",
-]
 
 [project.optional-dependencies]
 dev = [
