@@ -1,6 +1,6 @@
 [project]
 name = "product-agent"
-version = "12.4.0"
+version = "12.4.1"
 description = "Autonomous AI agent that builds, tests, and deploys web and native iOS applications from ideas"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "claude-code-sdk>=0.1.0,<2.0.0",
+    "claude-code-sdk>=0.0.10,<2.0.0",
 ]
 
 [project.urls]
